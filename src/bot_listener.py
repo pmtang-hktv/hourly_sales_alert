@@ -101,7 +101,7 @@ def answer_question(question: str) -> str:
 
     for _ in range(5):  # max 5 tool-call rounds
         response = client.messages.create(
-            model="claude-opus-4-7",
+            model="claude-sonnet-4-6",
             max_tokens=1024,
             system=_SYSTEM,
             tools=_TOOLS,
