@@ -15,7 +15,7 @@ SUBJECT_KEYWORD = "HKTVmall Payment Gateway Report"
 def _connect() -> imaplib.IMAP4_SSL:
     mail = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
     mail.login(IMAP_USER, IMAP_PASS)
-    mail.select(IMAP_FOLDER)
+    mail.select(f'"{IMAP_FOLDER}"')
     return mail
 
 
