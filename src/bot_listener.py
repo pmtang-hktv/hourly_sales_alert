@@ -131,14 +131,16 @@ def answer_question(question: str) -> str:
     return "Sorry, I couldn't complete the query."
 
 
-def _send_reply(text: str):
+def _send_reply(text: str, markdown: bool = False):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    payload: dict = {"chat_id": TELEGRAM_CHAT_ID, "text": text}
+    if markdown:
+        payload["parse_mode"] = "Markdown"
     try:
-        requests.post(
-            url,
-            json={"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"},
-            timeout=10,
-        )
+        resp = requests.post(url, json=payload, timeout=10)
+        data = resp.json()
+        if not data.get("ok"):
+            log.error("Telegram rejected message: %s", data)
     except Exception as exc:
         log.error("Failed to send reply: %s", exc)
 
@@ -168,7 +170,7 @@ def _poll_loop():
                     continue
 
                 log.info("Question from %s: %s", chat_id, text)
-                _send_reply("_Looking it up..._")
+                _send_reply("_Looking it up..._", markdown=True)
                 try:
                     answer = answer_question(text)
                     _send_reply(answer)
