@@ -12,6 +12,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from src.analyzer import build_fullday_summary, build_halfday_summary, check_anomalies
+from src.bot_listener import start_bot_listener
 from src.db import alert_sent, init_db, log_alert, upsert_daily, upsert_hourly
 from src.fetcher import fetch_latest_email
 from src.notifier import send_telegram
@@ -93,9 +94,11 @@ def _send_fullday_summary(report_date: str, summary: dict):
 
 if __name__ == "__main__":
     init_db()
+    start_bot_listener()
     scheduler = BlockingScheduler(timezone="Asia/Hong_Kong")
     scheduler.add_job(run_hourly_job, CronTrigger(minute=10), id="hourly_job")
     log.info("Scheduler started — running at :10 past every hour (HKT)")
+    log.info("Telegram bot listener running — send any question to your bot")
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):
