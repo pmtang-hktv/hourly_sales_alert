@@ -1,3 +1,6 @@
+from __future__ import annotations
+
+
 def format_anomaly_alert(anomalies: list[dict], row: dict) -> str:
     date = row["report_date"]
     slot = row["hour_slot"]

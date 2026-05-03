@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import re
 
 # Ordered to match column positions in the email table (columns 4–24)
