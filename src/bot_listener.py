@@ -145,18 +145,27 @@ def _send_reply(text: str, markdown: bool = False):
         log.error("Failed to send reply: %s", exc)
 
 
+def _handle_question(text: str):
+    try:
+        answer = answer_question(text)
+        _send_reply(answer)
+    except Exception as exc:
+        log.error("Error answering: %s", exc)
+        _send_reply(f"Sorry, something went wrong: {exc}")
+
+
 def _poll_loop():
     offset: int | None = None
     log.info("Telegram bot listener started — ready for questions")
     while True:
         try:
-            params: dict = {"timeout": 30, "allowed_updates": ["message"]}
+            params: dict = {"timeout": 20, "allowed_updates": ["message"]}
             if offset is not None:
                 params["offset"] = offset
             resp = requests.get(
                 f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/getUpdates",
                 params=params,
-                timeout=40,
+                timeout=(10, 25),
             )
             for update in resp.json().get("result", []):
                 offset = update["update_id"] + 1
@@ -171,12 +180,11 @@ def _poll_loop():
 
                 log.info("Question from %s: %s", chat_id, text)
                 _send_reply("_Looking it up..._", markdown=True)
-                try:
-                    answer = answer_question(text)
-                    _send_reply(answer)
-                except Exception as exc:
-                    log.error("Error answering: %s", exc)
-                    _send_reply(f"Sorry, something went wrong: {exc}")
+                threading.Thread(
+                    target=_handle_question,
+                    args=(text,),
+                    daemon=True,
+                ).start()
 
         except Exception as exc:
             log.error("Poll loop error: %s", exc)
