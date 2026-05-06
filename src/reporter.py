@@ -22,31 +22,34 @@ def format_anomaly_alert(anomalies: list[dict], row: dict) -> str:
 
 
 def format_halfday_summary(data: dict, report_date: str) -> str:
-    today = data["today_total"]
-    lw = data["last_week_total"]
-    fw_avg = data["four_week_avg"]
     weekday = data["weekday_name"]
+    today_orders = data["today_orders"]
+    today_gmv = data["today_gmv"]
+    avg_basket = data["today_avg_basket"]
+    lw_orders = data["lw_orders"]
+    lw_gmv = data["lw_gmv"]
+    fw_orders = data["fw_avg_orders"]
+    fw_gmv = data["fw_avg_gmv"]
 
-    lines = [f"🌅 *Half-Day Summary — {weekday} {report_date}*", f"Period: 00:00 – 12:00", ""]
-    lines.append(f"Orders: *{today:,}*")
+    lines = [f"🌅 *Half-Day Summary — {weekday} {report_date}*", "Period: 00:00 – 12:00", ""]
+    lines.append(f"Total Orders:    *{today_orders:,}*")
+    lines.append(f"Total Revenue:   *HKD {today_gmv:,.0f}*")
+    lines.append(f"Avg Order Value: *HKD {avg_basket:.2f}*")
 
-    if lw:
-        icon, diff = _compare(today, lw)
-        lines.append(f"{icon} vs last {weekday}: {lw:,} ({diff})")
+    if lw_orders:
+        icon, diff = _compare(today_orders, lw_orders)
+        icon2, diff2 = _compare(today_gmv, lw_gmv)
+        lines.append(f"\n{icon} vs last {weekday}: {lw_orders:,} orders ({diff}), HKD {lw_gmv:,.0f} ({diff2})")
 
-    if fw_avg:
-        icon, diff = _compare(today, fw_avg)
-        lines.append(f"{icon} vs 4-wk {weekday} avg: {fw_avg:,.0f} ({diff})")
+    if fw_orders:
+        icon, diff = _compare(today_orders, fw_orders)
+        icon2, diff2 = _compare(today_gmv, fw_gmv)
+        lines.append(f"{icon} vs 4-wk {weekday} avg: {fw_orders:,.0f} orders ({diff}), HKD {fw_gmv:,.0f} ({diff2})")
 
-    if data.get("today_rows"):
-        top3 = sorted(data["today_rows"], key=lambda r: r["total_order"], reverse=True)[:3]
-        top_str = ", ".join(f"{r['hour_slot']} ({r['total_order']:,})" for r in top3)
-        lines.append(f"\nTop 3 hours: {top_str}")
-
-    # Pace vs last week at same point in morning
-    if lw and fw_avg:
-        lw_pace = round(today / lw * 100, 1) if lw else None
-        lines.append(f"\nMorning pace vs last week: *{lw_pace}%*")
+    if data.get("best_hour"):
+        b, w = data["best_hour"], data["worst_hour"]
+        lines.append(f"\n🏆 Best hour:    {b['hour_slot']} — {b['total_order']:,} orders (HKD {b['basket_size']:.0f} basket)")
+        lines.append(f"🔻 Slowest hour: {w['hour_slot']} — {w['total_order']:,} orders (HKD {w['basket_size']:.0f} basket)")
 
     return "\n".join(lines)
 

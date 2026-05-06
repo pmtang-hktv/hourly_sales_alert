@@ -67,6 +67,10 @@ def _check_metric(row: dict, history: list[dict], col: str, label: str, out: lis
         })
 
 
+def _row_gmv(rows: list[dict]) -> float:
+    return sum((r.get("total_order") or 0) * (r.get("basket_size") or 0) for r in rows)
+
+
 def build_halfday_summary(report_date: str) -> dict:
     today_rows = [r for r in get_hours_for_date(report_date) if r["hour_start"] < 12]
     date_obj = datetime.strptime(report_date, "%Y-%m-%d")
@@ -74,20 +78,34 @@ def build_halfday_summary(report_date: str) -> dict:
     last_week_date = (date_obj - timedelta(days=7)).strftime("%Y-%m-%d")
     last_week_rows = [r for r in get_hours_for_date(last_week_date) if r["hour_start"] < 12]
 
-    four_week_totals = []
+    four_week_orders, four_week_gmv = [], []
     for w in range(1, 5):
         d = (date_obj - timedelta(days=7 * w)).strftime("%Y-%m-%d")
         rows = [r for r in get_hours_for_date(d) if r["hour_start"] < 12]
         if rows:
-            four_week_totals.append(sum(r["total_order"] for r in rows))
+            four_week_orders.append(sum(r["total_order"] for r in rows))
+            four_week_gmv.append(_row_gmv(rows))
+
+    today_orders = sum(r["total_order"] for r in today_rows)
+    today_gmv = _row_gmv(today_rows)
+    lw_orders = sum(r["total_order"] for r in last_week_rows)
+    lw_gmv = _row_gmv(last_week_rows)
+
+    best_hour = max(today_rows, key=lambda r: r["total_order"]) if today_rows else None
+    worst_hour = min(today_rows, key=lambda r: r["total_order"]) if today_rows else None
 
     return {
-        "today_total":    sum(r["total_order"] for r in today_rows),
-        "last_week_total": sum(r["total_order"] for r in last_week_rows),
-        "four_week_avg":  round(float(np.mean(four_week_totals)), 0) if four_week_totals else None,
-        "today_rows":     today_rows,
-        "last_week_rows": last_week_rows,
-        "weekday_name":   date_obj.strftime("%A"),
+        "today_orders":     today_orders,
+        "today_gmv":        today_gmv,
+        "today_avg_basket": today_gmv / today_orders if today_orders else 0,
+        "lw_orders":        lw_orders,
+        "lw_gmv":           lw_gmv,
+        "fw_avg_orders":    round(float(np.mean(four_week_orders)), 0) if four_week_orders else None,
+        "fw_avg_gmv":       round(float(np.mean(four_week_gmv)), 0) if four_week_gmv else None,
+        "best_hour":        best_hour,
+        "worst_hour":       worst_hour,
+        "weekday_name":     date_obj.strftime("%A"),
+        "report_date":      report_date,
     }
 
 
