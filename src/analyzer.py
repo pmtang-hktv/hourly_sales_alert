@@ -26,6 +26,14 @@ def check_anomalies(current_row: dict) -> list[dict]:
     _check_metric(current_row, history, "total_order", "Total Orders", anomalies)
     _check_metric(current_row, history, "basket_size", "Basket Size ($)", anomalies)
 
+    # GMV = total_order * basket_size (not stored directly, computed per row)
+    gmv_current = (current_row.get("total_order") or 0) * (current_row.get("basket_size") or 0)
+    gmv_history = [
+        {**h, "_gmv": (h.get("total_order") or 0) * (h.get("basket_size") or 0)}
+        for h in history
+    ]
+    _check_metric({"_gmv": gmv_current}, gmv_history, "_gmv", "GMV (HKD)", anomalies)
+
     for gw in GATEWAY_COLS:
         avg = np.mean([h.get(gw, 0) or 0 for h in history])
         if avg < MIN_GATEWAY_VOLUME:
