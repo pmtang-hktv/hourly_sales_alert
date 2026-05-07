@@ -13,14 +13,6 @@ def format_anomaly_alert(anomalies: list[dict], row: dict, last_week_row: dict |
     lines.append(f"GMV:     *HKD {gmv:,.0f}*")
     lines.append(f"Basket:  *HKD {basket:.2f}*")
 
-    if last_week_row:
-        lw_orders = int(last_week_row.get("total_order") or 0)
-        lw_basket = float(last_week_row.get("basket_size") or 0)
-        lw_gmv = lw_orders * lw_basket
-        icon_o, diff_o = _compare(total_orders, lw_orders)
-        icon_g, diff_g = _compare(gmv, lw_gmv)
-        lines.append(f"\n{icon_o} vs last week same hour: {lw_orders:,} orders ({diff_o}), HKD {lw_gmv:,.0f} GMV ({diff_g})")
-
     lines.append("\n*Anomalous metrics (vs 4-wk avg):*")
     for a in anomalies:
         icon = "📈" if a["direction"] == "high" else "📉"
@@ -31,6 +23,14 @@ def format_anomaly_alert(anomalies: list[dict], row: dict, last_week_row: dict |
             f"{icon} *{a['label']}*: {current} "
             f"({sign}{a['pct_diff']}% vs avg {avg}, Z={a['z_score']})"
         )
+
+    if last_week_row:
+        lw_orders = int(last_week_row.get("total_order") or 0)
+        lw_basket = float(last_week_row.get("basket_size") or 0)
+        lw_gmv = lw_orders * lw_basket
+        icon_o, diff_o = _compare(total_orders, lw_orders)
+        icon_g, diff_g = _compare(gmv, lw_gmv)
+        lines.append(f"\n{icon_o} vs last week same hour: {lw_orders:,} orders ({diff_o}), HKD {lw_gmv:,.0f} GMV ({diff_g})")
 
     return "\n".join(lines)
 
