@@ -1,13 +1,27 @@
 from __future__ import annotations
 
 
-def format_anomaly_alert(anomalies: list[dict], row: dict) -> str:
+def format_anomaly_alert(anomalies: list[dict], row: dict, last_week_row: dict | None = None) -> str:
     date = row["report_date"]
     slot = row["hour_slot"]
     total_orders = int(row.get("total_order") or 0)
+    basket = float(row.get("basket_size") or 0)
+    gmv = total_orders * basket
 
-    lines = [f"⚠️ *Sales Anomaly — {date} {slot}*", f"Total Orders this hour: *{total_orders:,}*", ""]
+    lines = [f"⚠️ *Sales Anomaly — {date} {slot}*", ""]
+    lines.append(f"Orders:  *{total_orders:,}*")
+    lines.append(f"GMV:     *HKD {gmv:,.0f}*")
+    lines.append(f"Basket:  *HKD {basket:.2f}*")
 
+    if last_week_row:
+        lw_orders = int(last_week_row.get("total_order") or 0)
+        lw_basket = float(last_week_row.get("basket_size") or 0)
+        lw_gmv = lw_orders * lw_basket
+        icon_o, diff_o = _compare(total_orders, lw_orders)
+        icon_g, diff_g = _compare(gmv, lw_gmv)
+        lines.append(f"\n{icon_o} vs last week same hour: {lw_orders:,} orders ({diff_o}), HKD {lw_gmv:,.0f} GMV ({diff_g})")
+
+    lines.append("\n*Anomalous metrics (vs 4-wk avg):*")
     for a in anomalies:
         icon = "📈" if a["direction"] == "high" else "📉"
         sign = "+" if a["pct_diff"] > 0 else ""
@@ -15,7 +29,7 @@ def format_anomaly_alert(anomalies: list[dict], row: dict) -> str:
         avg = _fmt(a["mean"])
         lines.append(
             f"{icon} *{a['label']}*: {current} "
-            f"({sign}{a['pct_diff']}% vs 4-wk avg {avg}, Z={a['z_score']})"
+            f"({sign}{a['pct_diff']}% vs avg {avg}, Z={a['z_score']})"
         )
 
     return "\n".join(lines)

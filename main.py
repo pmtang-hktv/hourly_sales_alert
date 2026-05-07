@@ -7,13 +7,14 @@ Schedule:
   00:10                — also send full-day summary for previous day
 """
 import logging
+from datetime import datetime, timedelta
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from src.analyzer import build_fullday_summary, build_halfday_summary, check_anomalies
 from src.bot_listener import start_bot_listener
-from src.db import alert_sent, init_db, log_alert, upsert_daily, upsert_hourly
+from src.db import alert_sent, get_hour_row, init_db, log_alert, upsert_daily, upsert_hourly
 from src.fetcher import fetch_latest_email
 from src.notifier import send_telegram
 from src.parser import parse_email
@@ -58,7 +59,9 @@ def run_hourly_job():
         if anomalies:
             key = f"anomaly_{report_date}_{latest['hour_slot']}"
             if not alert_sent(key):
-                msg = format_anomaly_alert(anomalies, latest)
+                lw_date = (datetime.strptime(report_date, "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
+                last_week_row = get_hour_row(lw_date, latest["hour_slot"])
+                msg = format_anomaly_alert(anomalies, latest, last_week_row)
                 if send_telegram(msg):
                     log_alert(key, msg)
                     log.info("Sent anomaly alert for %s %s (%d metrics)", report_date, latest["hour_slot"], len(anomalies))

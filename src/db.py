@@ -125,6 +125,13 @@ def get_daily_history(weeks: int = 5) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_hour_row(report_date: str, hour_slot: str) -> dict | None:
+    sql = "SELECT * FROM hourly_stats WHERE report_date = ? AND hour_slot = ?"
+    with get_conn() as conn:
+        row = conn.execute(sql, (report_date, hour_slot)).fetchone()
+    return dict(row) if row else None
+
+
 def get_hours_for_date(report_date: str) -> list[dict]:
     sql = "SELECT * FROM hourly_stats WHERE report_date = ? ORDER BY hour_start"
     with get_conn() as conn:
