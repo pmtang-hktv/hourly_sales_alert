@@ -11,6 +11,8 @@ IMAP_FOLDER = os.getenv("IMAP_FOLDER", "INBOX")
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+_extra = [x.strip() for x in os.getenv("TELEGRAM_EXTRA_CHAT_IDS", "").split(",") if x.strip()]
+TELEGRAM_ALL_CHAT_IDS: list = ([TELEGRAM_CHAT_ID] if TELEGRAM_CHAT_ID else []) + _extra
 
 DB_PATH = os.getenv("DB_PATH", "data/sales.db")
 ANOMALY_Z_THRESHOLD = float(os.getenv("ANOMALY_Z_THRESHOLD", "2.0"))

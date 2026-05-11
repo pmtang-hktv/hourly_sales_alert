@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-def format_anomaly_alert(anomalies: list[dict], row: dict, last_week_row: dict | None = None) -> str:
+def format_anomaly_alert(anomalies: list[dict], row: dict, last_week_row: dict | None = None, day_totals: dict | None = None) -> str:
     date = row["report_date"]
     slot = row["hour_slot"]
     total_orders = int(row.get("total_order") or 0)
@@ -12,6 +12,12 @@ def format_anomaly_alert(anomalies: list[dict], row: dict, last_week_row: dict |
     lines.append(f"Orders:  *{total_orders:,}*")
     lines.append(f"GMV:     *HKD {gmv:,.0f}*")
     lines.append(f"Basket:  *HKD {basket:.2f}*")
+
+    if day_totals and day_totals.get("orders"):
+        d_orders = int(day_totals["orders"] or 0)
+        d_gmv = float(day_totals["gmv"] or 0)
+        end_hour = int(day_totals.get("last_hour_start", row.get("hour_start", 0))) + 1
+        lines.append(f"\n📅 Day so far (00:00–{end_hour:02d}:00): *{d_orders:,}* orders, *HKD {d_gmv:,.0f}* GMV")
 
     lines.append("\n*Anomalous metrics (vs 4-wk avg):*")
     for a in anomalies:

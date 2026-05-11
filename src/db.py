@@ -125,6 +125,19 @@ def get_daily_history(weeks: int = 5) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+def get_day_totals_upto_hour(report_date: str, hour_start: int) -> dict:
+    sql = """
+        SELECT SUM(total_order) as orders,
+               SUM(total_order * basket_size) as gmv,
+               MAX(hour_start) as last_hour_start
+        FROM hourly_stats
+        WHERE report_date = ? AND hour_start <= ?
+    """
+    with get_conn() as conn:
+        row = conn.execute(sql, (report_date, hour_start)).fetchone()
+    return dict(row) if row else {"orders": 0, "gmv": 0, "last_hour_start": hour_start}
+
+
 def get_hour_row(report_date: str, hour_slot: str) -> dict | None:
     sql = "SELECT * FROM hourly_stats WHERE report_date = ? AND hour_slot = ?"
     with get_conn() as conn:

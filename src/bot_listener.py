@@ -9,7 +9,7 @@ from datetime import datetime
 import anthropic
 import requests
 
-from src.config import ANTHROPIC_API_KEY, DB_PATH, TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from src.config import ANTHROPIC_API_KEY, DB_PATH, TELEGRAM_ALL_CHAT_IDS, TELEGRAM_BOT_TOKEN
 
 log = logging.getLogger(__name__)
 
@@ -139,9 +139,9 @@ def answer_question(question: str) -> str:
     return "Sorry, I couldn't complete the query."
 
 
-def _send_reply(text: str, markdown: bool = False):
+def _send_reply(text: str, chat_id: str, markdown: bool = False):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload: dict = {"chat_id": TELEGRAM_CHAT_ID, "text": text}
+    payload: dict = {"chat_id": chat_id, "text": text}
     if markdown:
         payload["parse_mode"] = "Markdown"
     try:
@@ -153,13 +153,13 @@ def _send_reply(text: str, markdown: bool = False):
         log.error("Failed to send reply: %s", exc)
 
 
-def _handle_question(text: str):
+def _handle_question(text: str, chat_id: str):
     try:
         answer = answer_question(text)
-        _send_reply(answer)
+        _send_reply(answer, chat_id)
     except Exception as exc:
         log.error("Error answering: %s", exc)
-        _send_reply(f"Sorry, something went wrong: {exc}")
+        _send_reply(f"Sorry, something went wrong: {exc}", chat_id)
 
 
 def _poll_loop():
@@ -181,16 +181,16 @@ def _poll_loop():
                 chat_id = str(msg.get("chat", {}).get("id", ""))
                 text = (msg.get("text") or "").strip()
 
-                if chat_id != str(TELEGRAM_CHAT_ID) or not text:
+                if chat_id not in [str(c) for c in TELEGRAM_ALL_CHAT_IDS] or not text:
                     continue
                 if text.startswith("/"):
                     continue
 
                 log.info("Question from %s: %s", chat_id, text)
-                _send_reply("_Looking it up..._", markdown=True)
+                _send_reply("_Looking it up..._", chat_id, markdown=True)
                 threading.Thread(
                     target=_handle_question,
-                    args=(text,),
+                    args=(text, chat_id),
                     daemon=True,
                 ).start()
 
