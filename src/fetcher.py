@@ -3,6 +3,7 @@ from __future__ import annotations
 import email
 import imaplib
 import logging
+import socket
 from datetime import datetime, timedelta
 
 from src.config import IMAP_FOLDER, IMAP_HOST, IMAP_PASS, IMAP_PORT, IMAP_USER
@@ -12,8 +13,12 @@ log = logging.getLogger(__name__)
 SUBJECT_KEYWORD = "HKTVmall Payment Gateway Report"
 
 
+IMAP_TIMEOUT = 60  # seconds — prevents frozen connection from blocking the scheduler
+
+
 def _connect() -> imaplib.IMAP4_SSL:
     mail = imaplib.IMAP4_SSL(IMAP_HOST, IMAP_PORT)
+    mail.sock.settimeout(IMAP_TIMEOUT)
     mail.login(IMAP_USER, IMAP_PASS)
     mail.select(f'"{IMAP_FOLDER}"')
     return mail
