@@ -10,11 +10,17 @@ from src.config import ANTHROPIC_API_KEY
 
 log = logging.getLogger(__name__)
 
-_EXTRACTION_PROMPT = """Extract the following metrics from this HKTVmall Daily Sales Update dashboard image.
-Return ONLY a valid JSON object with exactly these keys (use null if a value is not visible):
+_EXTRACTION_PROMPT = """This is a HKTVmall Daily Sales Update dashboard image. Extract metrics carefully by section.
+
+LAYOUT GUIDE:
+- TOP of image: Overall platform metrics with the LARGEST numbers (GMV in tens of millions HKD, orders in tens of thousands)
+- Middle sections: Express Total, HM Mart, HKTVmall Veggie — subsection breakdowns
+- Lower sections: ThePlace, Mainland Merchant, igloo+, Insurance, Online Normal vs 3PL, Same Day Delivery
+
+Return ONLY a valid JSON object with exactly these keys (use null if not visible):
 
 {
-  "report_date": "YYYY-MM-DD or null",
+  "report_date": "YYYY-MM-DD",
   "top_level": {
     "gmv": number,
     "mtd_gmv": number,
@@ -75,10 +81,12 @@ Return ONLY a valid JSON object with exactly these keys (use null if a value is 
   }
 }
 
-Rules:
-- All monetary values in HKD (remove $ signs and commas)
-- Percentages as numbers (e.g. 14.8 not 0.148)
-- If a section is not visible, use null for the whole section
+IMPORTANT rules:
+- top_level GMV should be the TOTAL platform GMV (typically HKD 10M–30M range for a day), NOT a subsection
+- top_level num_orders should be total platform orders (typically 30,000–50,000 range), NOT a subsection
+- ThePlace, Mainland, igloo+ are SUBSECTIONS with much smaller numbers
+- All monetary values in HKD — remove $ signs and commas
+- Percentages as plain numbers (e.g. 14.8 not 0.148)
 - Return only the JSON, no explanation"""
 
 
