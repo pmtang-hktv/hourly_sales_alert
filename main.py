@@ -101,10 +101,11 @@ def _send_fullday_summary(report_date: str, summary: dict):
 
 def run_daily_dashboard_job():
     log.info("Daily dashboard job started")
-    today = datetime.now().strftime("%Y-%m-%d")
-    key = f"daily_dashboard_{today}"
+    # The 8:15am email always covers yesterday
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    key = f"daily_dashboard_{yesterday}"
     if alert_sent(key):
-        log.info("Daily dashboard already sent for %s", today)
+        log.info("Daily dashboard already sent for %s", yesterday)
         return
 
     raw = fetch_daily_dashboard_email()
@@ -118,7 +119,7 @@ def run_daily_dashboard_job():
         return
 
     import json
-    report_date = parsed.get("report_date") or today
+    report_date = yesterday  # always use yesterday — Vision date parsing is unreliable for HK format
     upsert_daily_dashboard(report_date, parsed, json.dumps(parsed))
     msg = format_daily_dashboard_summary(get_daily_dashboard(report_date), report_date)
     if send_telegram(msg):

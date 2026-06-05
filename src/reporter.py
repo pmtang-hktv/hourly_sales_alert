@@ -1,5 +1,14 @@
 from __future__ import annotations
 
+from datetime import datetime
+
+
+def _fmt_date(date_str: str) -> str:
+    try:
+        return datetime.strptime(date_str, "%Y-%m-%d").strftime("%-d %b %Y")
+    except ValueError:
+        return date_str
+
 
 def format_anomaly_alert(anomalies: list[dict], row: dict, last_week_row: dict | None = None, day_totals: dict | None = None) -> str:
     date = row["report_date"]
@@ -48,7 +57,7 @@ def format_halfday_summary(data: dict, report_date: str) -> str:
     fw_orders = data["fw_avg_orders"]
     fw_gmv = data["fw_avg_gmv"]
 
-    lines = [f"🌅 <b>Half-Day Summary — {weekday} {report_date}</b>", "Period: 00:00 – 12:00", ""]
+    lines = [f"🌅 <b>Half-Day Summary — {weekday} {_fmt_date(report_date)}</b>", "Period: 00:00 – 12:00", ""]
     lines.append(f"Total Orders:    <b>{today_orders:,}</b>")
     lines.append(f"Total Revenue:   <b>HKD {today_gmv:,.0f}</b>")
     lines.append(f"Avg Order Value: <b>HKD {avg_basket:.2f}</b>")
@@ -84,7 +93,7 @@ def format_fullday_summary(data: dict) -> str:
     avg_order = float(ds.get("avg_amount_per_order") or 0)
     over_2k = int(ds.get("total_order_over_2000") or 0)
 
-    lines = [f"📊 <b>Daily Summary — {weekday} {date}</b>", ""]
+    lines = [f"📊 <b>Daily Summary — {weekday} {_fmt_date(date)}</b>", ""]
     lines.append(f"Total Orders:      <b>{total_orders:,}</b>")
     lines.append(f"Total Revenue:     <b>HKD {total_amount:,.0f}</b>")
     lines.append(f"Avg Order Value:   <b>HKD {avg_order:.2f}</b>")
@@ -152,7 +161,7 @@ def format_daily_dashboard_summary(row: dict, report_date: str) -> str:
             return "N/A"
         return f"{v:.1f}%"
 
-    lines = [f"📊 <b>Daily Sales Update — {report_date}</b>", ""]
+    lines = [f"📊 <b>Daily Sales Update — {_fmt_date(report_date)}</b>", ""]
 
     lines.append("<b>Top Level</b>")
     lines.append(f"GMV:             <b>{hkd(row.get('gmv'))}</b>  (MTD: {hkd(row.get('mtd_gmv'))})")

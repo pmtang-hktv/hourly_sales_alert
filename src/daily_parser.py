@@ -20,7 +20,7 @@ LAYOUT GUIDE:
 Return ONLY a valid JSON object with exactly these keys (use null if not visible):
 
 {
-  "report_date": "YYYY-MM-DD",
+  "report_date": "YYYY-MM-DD (dates in image are DD/MM/YYYY HK format — convert correctly, e.g. 4/6/2026 = 2026-06-04)",
   "top_level": {
     "gmv": number,
     "mtd_gmv": number,
