@@ -10,6 +10,9 @@ from src.config import IMAP_DAILY_FOLDER, IMAP_HOST, IMAP_PASS, IMAP_PORT, IMAP_
 log = logging.getLogger(__name__)
 
 SUBJECT_KEYWORD = "Daily Sales Update"
+# Exact target after stripping "FW:" prefix — the full platform dashboard email
+TARGET_SUBJECT = "Daily Sales Update (Basic)"
+EXCLUDE_SUBJECT = "Offline Only"
 IMAP_TIMEOUT = 60
 
 
@@ -37,8 +40,24 @@ def fetch_daily_dashboard_email() -> dict | None:
             log.warning("No daily dashboard email found since %s", since)
             return None
 
-        log.info("Found %d daily dashboard email(s)", len(ids))
-        _, msg_data = mail.fetch(ids[-1], "(RFC822)")
+        # Filter to the exact "(Basic)" platform dashboard, excluding "Offline Only".
+        # Iterate newest-first and take the first match.
+        target_uid = None
+        target_subject = ""
+        for uid in reversed(ids):
+            _, md = mail.fetch(uid, "(BODY[HEADER.FIELDS (SUBJECT)])")
+            subj = md[0][1].decode(errors="ignore")
+            if TARGET_SUBJECT in subj and EXCLUDE_SUBJECT not in subj:
+                target_uid = uid
+                target_subject = subj.replace("Subject:", "").strip()
+                break
+
+        if not target_uid:
+            log.warning("No '%s' email found (excluding '%s')", TARGET_SUBJECT, EXCLUDE_SUBJECT)
+            return None
+
+        log.info("Matched daily dashboard email: %s", target_subject)
+        _, msg_data = mail.fetch(target_uid, "(RFC822)")
         raw = msg_data[0][1]
         msg = email.message_from_bytes(raw)
 
