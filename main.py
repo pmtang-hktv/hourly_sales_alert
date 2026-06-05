@@ -5,6 +5,7 @@ Schedule:
   :10 past every hour  — fetch latest email, store data, check for anomalies
   12:10                — also send half-day summary (00:00–12:00)
   00:10                — also send full-day summary for previous day
+  08:15                — fetch daily dashboard email, extract via Vision, send summary
 """
 import logging
 from datetime import datetime, timedelta
@@ -14,11 +15,13 @@ from apscheduler.triggers.cron import CronTrigger
 
 from src.analyzer import build_fullday_summary, build_halfday_summary, check_anomalies
 from src.bot_listener import start_bot_listener
-from src.db import alert_sent, get_day_totals_upto_hour, get_hour_row, init_db, log_alert, upsert_daily, upsert_hourly
+from src.daily_fetcher import fetch_daily_dashboard_email
+from src.daily_parser import parse_daily_dashboard
+from src.db import alert_sent, get_daily_dashboard, get_day_totals_upto_hour, get_hour_row, init_db, log_alert, upsert_daily, upsert_daily_dashboard, upsert_hourly
 from src.fetcher import fetch_latest_email
 from src.notifier import send_telegram
 from src.parser import parse_email
-from src.reporter import format_anomaly_alert, format_fullday_summary, format_halfday_summary
+from src.reporter import format_anomaly_alert, format_daily_dashboard_summary, format_fullday_summary, format_halfday_summary
 
 logging.basicConfig(
     level=logging.INFO,
@@ -96,12 +99,41 @@ def _send_fullday_summary(report_date: str, summary: dict):
         log.info("Sent full-day summary for %s", report_date)
 
 
+def run_daily_dashboard_job():
+    log.info("Daily dashboard job started")
+    today = datetime.now().strftime("%Y-%m-%d")
+    key = f"daily_dashboard_{today}"
+    if alert_sent(key):
+        log.info("Daily dashboard already sent for %s", today)
+        return
+
+    raw = fetch_daily_dashboard_email()
+    if not raw:
+        log.warning("No daily dashboard email found")
+        return
+
+    parsed = parse_daily_dashboard(raw["image_bytes"])
+    if not parsed:
+        log.warning("Failed to parse daily dashboard image")
+        return
+
+    import json
+    report_date = parsed.get("report_date") or today
+    upsert_daily_dashboard(report_date, parsed, json.dumps(parsed))
+    msg = format_daily_dashboard_summary(get_daily_dashboard(report_date), report_date)
+    if send_telegram(msg):
+        log_alert(key, msg)
+        log.info("Sent daily dashboard summary for %s", report_date)
+
+
 if __name__ == "__main__":
     init_db()
     start_bot_listener()
     scheduler = BlockingScheduler(timezone="Asia/Hong_Kong")
     scheduler.add_job(run_hourly_job, CronTrigger(minute=10), id="hourly_job")
+    scheduler.add_job(run_daily_dashboard_job, CronTrigger(hour=8, minute=15), id="daily_dashboard_job")
     log.info("Scheduler started — running at :10 past every hour (HKT)")
+    log.info("Daily dashboard job scheduled at 08:15 HKT")
     log.info("Telegram bot listener running — send any question to your bot")
     try:
         scheduler.start()

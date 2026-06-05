@@ -35,6 +35,23 @@ Table: daily_summary  — one row per report_date (from midnight email)
   total_order_over_2000 INTEGER  orders with value > HKD 2000
   total_amount          REAL  total revenue in HKD
   avg_amount_per_order  REAL  HKD
+
+Table: daily_dashboard  — one row per report_date (from morning dashboard email, extracted via Vision)
+  report_date           TEXT  YYYY-MM-DD
+  gmv, mtd_gmv, gmv_projection, gmv_per_order  REAL  HKD
+  net_sales, mtd_net_sales  REAL  HKD
+  num_orders            INTEGER
+  num_customers         INTEGER
+  conversion_rate       REAL  percentage
+  mainland_yesterday_gmv, mainland_yesterday_orders, mainland_yesterday_customers,
+    mainland_yesterday_gmv_per_order, mainland_mtd_gmv, mainland_mtd_orders
+  igloo_yesterday_gmv, igloo_yesterday_orders, igloo_mtd_gmv, igloo_mtd_orders
+  theplace_yesterday_gmv, theplace_yesterday_orders, theplace_yesterday_customers,
+    theplace_yesterday_gmv_per_order, theplace_mtd_gmv, theplace_mtd_orders
+  insurance_yesterday_gmv, insurance_yesterday_orders, insurance_mtd_gmv, insurance_mtd_orders
+  normal_yesterday_gmv, normal_yesterday_pct, threpl_yesterday_gmv, threpl_yesterday_pct  (Online Normal vs 3PL)
+  normal_mtd_gmv, normal_mtd_pct, threpl_mtd_gmv, threpl_mtd_pct
+  sameday_yesterday_pct, sameday_mtd_pct  REAL  percentage of GMV from same-day delivery merchants
 """
 
 _SYSTEM = [

@@ -8,6 +8,7 @@ IMAP_PORT = int(os.getenv("IMAP_PORT", "993"))
 IMAP_USER = os.getenv("IMAP_USER", "")
 IMAP_PASS = os.getenv("IMAP_PASS", "")
 IMAP_FOLDER = os.getenv("IMAP_FOLDER", "INBOX")
+IMAP_DAILY_FOLDER = os.getenv("IMAP_DAILY_FOLDER", "BI - Daily Sales Update")
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")

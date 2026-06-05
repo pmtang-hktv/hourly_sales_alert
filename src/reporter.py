@@ -137,3 +137,73 @@ def _pct(part, total) -> str:
     if not total:
         return "0%"
     return f"{part / total * 100:.1f}%"
+
+
+def format_daily_dashboard_summary(row: dict, report_date: str) -> str:
+    def hkd(v) -> str:
+        if v is None:
+            return "N/A"
+        return f"HKD {v:,.0f}"
+
+    def num(v) -> str:
+        if v is None:
+            return "N/A"
+        return f"{int(v):,}"
+
+    def pct(v) -> str:
+        if v is None:
+            return "N/A"
+        return f"{v:.1f}%"
+
+    lines = [f"📊 *Daily Sales Update — {report_date}*", ""]
+
+    # Top level
+    lines.append("*Top Level*")
+    lines.append(f"GMV:             *{hkd(row.get('gmv'))}*  (MTD: {hkd(row.get('mtd_gmv'))})")
+    lines.append(f"GMV Projection:  {hkd(row.get('gmv_projection'))}")
+    lines.append(f"Net Sales:       *{hkd(row.get('net_sales'))}*  (MTD: {hkd(row.get('mtd_net_sales'))})")
+    lines.append(f"Orders:          *{num(row.get('num_orders'))}*")
+    lines.append(f"Customers:       {num(row.get('num_customers'))}")
+    lines.append(f"GMV/Order:       {hkd(row.get('gmv_per_order'))}")
+    lines.append(f"Conversion Rate: {pct(row.get('conversion_rate'))}")
+
+    # Mainland Merchant
+    mm_gmv = row.get("mainland_yesterday_gmv")
+    mm_ord = row.get("mainland_yesterday_orders")
+    if mm_gmv or mm_ord:
+        lines.append("\n*Mainland Merchant Sales*")
+        lines.append(f"Yesterday: {hkd(mm_gmv)}, {num(mm_ord)} orders  (MTD: {hkd(row.get('mainland_mtd_gmv'))}, {num(row.get('mainland_mtd_orders'))} orders)")
+
+    # igloo+
+    ig_gmv = row.get("igloo_yesterday_gmv")
+    if ig_gmv:
+        lines.append("\n*igloo+ Sales*")
+        lines.append(f"Yesterday: {hkd(ig_gmv)}, {num(row.get('igloo_yesterday_orders'))} orders  (MTD: {hkd(row.get('igloo_mtd_gmv'))}, {num(row.get('igloo_mtd_orders'))} orders)")
+
+    # ThePlace
+    tp_gmv = row.get("theplace_yesterday_gmv")
+    if tp_gmv:
+        lines.append("\n*ThePlace*")
+        lines.append(f"Yesterday: {hkd(tp_gmv)}, {num(row.get('theplace_yesterday_orders'))} orders  (MTD: {hkd(row.get('theplace_mtd_gmv'))}, {num(row.get('theplace_mtd_orders'))} orders)")
+
+    # Insurance
+    ins_gmv = row.get("insurance_yesterday_gmv")
+    if ins_gmv:
+        lines.append("\n*Insurance Sales*")
+        lines.append(f"Yesterday: {hkd(ins_gmv)}, {num(row.get('insurance_yesterday_orders'))} orders  (MTD: {hkd(row.get('insurance_mtd_gmv'))}, {num(row.get('insurance_mtd_orders'))} orders)")
+
+    # Online Normal vs 3PL
+    n_pct = row.get("normal_yesterday_pct")
+    p_pct = row.get("threpl_yesterday_pct")
+    if n_pct is not None or p_pct is not None:
+        lines.append("\n*Online Normal vs 3PL*")
+        lines.append(f"Yesterday: Normal {pct(n_pct)} ({hkd(row.get('normal_yesterday_gmv'))})  /  3PL {pct(p_pct)} ({hkd(row.get('threpl_yesterday_gmv'))})")
+        lines.append(f"MTD:       Normal {pct(row.get('normal_mtd_pct'))} ({hkd(row.get('normal_mtd_gmv'))})  /  3PL {pct(row.get('threpl_mtd_pct'))} ({hkd(row.get('threpl_mtd_gmv'))})")
+
+    # Same Day Delivery
+    sd_pct = row.get("sameday_yesterday_pct")
+    if sd_pct is not None:
+        lines.append("\n*Same Day Delivery Merchant SKU GMV%*")
+        lines.append(f"Yesterday: {pct(sd_pct)}  /  MTD: {pct(row.get('sameday_mtd_pct'))}")
+
+    return "\n".join(lines)

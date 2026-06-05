@@ -51,6 +51,52 @@ CREATE TABLE IF NOT EXISTS daily_summary (
     created_at            TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS daily_dashboard (
+    id                       INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_date              TEXT NOT NULL UNIQUE,
+    gmv                      REAL,
+    mtd_gmv                  REAL,
+    gmv_projection           REAL,
+    gmv_per_order            REAL,
+    net_sales                REAL,
+    mtd_net_sales            REAL,
+    num_orders               INTEGER,
+    num_customers            INTEGER,
+    conversion_rate          REAL,
+    mainland_yesterday_gmv   REAL,
+    mainland_yesterday_orders INTEGER,
+    mainland_yesterday_customers INTEGER,
+    mainland_yesterday_gmv_per_order REAL,
+    mainland_mtd_gmv         REAL,
+    mainland_mtd_orders      INTEGER,
+    igloo_yesterday_gmv      REAL,
+    igloo_yesterday_orders   INTEGER,
+    igloo_mtd_gmv            REAL,
+    igloo_mtd_orders         INTEGER,
+    theplace_yesterday_gmv   REAL,
+    theplace_yesterday_orders INTEGER,
+    theplace_yesterday_customers INTEGER,
+    theplace_yesterday_gmv_per_order REAL,
+    theplace_mtd_gmv         REAL,
+    theplace_mtd_orders      INTEGER,
+    insurance_yesterday_gmv  REAL,
+    insurance_yesterday_orders INTEGER,
+    insurance_mtd_gmv        REAL,
+    insurance_mtd_orders     INTEGER,
+    normal_yesterday_gmv     REAL,
+    normal_yesterday_pct     REAL,
+    threpl_yesterday_gmv     REAL,
+    threpl_yesterday_pct     REAL,
+    normal_mtd_gmv           REAL,
+    normal_mtd_pct           REAL,
+    threpl_mtd_gmv           REAL,
+    threpl_mtd_pct           REAL,
+    sameday_yesterday_pct    REAL,
+    sameday_mtd_pct          REAL,
+    raw_json                 TEXT,
+    created_at               TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS alerts_log (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     alert_key  TEXT NOT NULL UNIQUE,
@@ -150,6 +196,68 @@ def get_hours_for_date(report_date: str) -> list[dict]:
     with get_conn() as conn:
         rows = conn.execute(sql, (report_date,)).fetchall()
     return [dict(r) for r in rows]
+
+
+def upsert_daily_dashboard(report_date: str, parsed: dict, raw_json: str):
+    import json as _json
+    tl = parsed.get("top_level") or {}
+    mm = parsed.get("mainland_merchant") or {}
+    ig = parsed.get("igloo_plus") or {}
+    tp = parsed.get("theplace") or {}
+    ins = parsed.get("insurance") or {}
+    onl = parsed.get("online_normal_vs_3pl") or {}
+    sd = parsed.get("same_day_delivery") or {}
+
+    row = {
+        "report_date": report_date,
+        "gmv": tl.get("gmv"), "mtd_gmv": tl.get("mtd_gmv"),
+        "gmv_projection": tl.get("gmv_projection"), "gmv_per_order": tl.get("gmv_per_order"),
+        "net_sales": tl.get("net_sales"), "mtd_net_sales": tl.get("mtd_net_sales"),
+        "num_orders": tl.get("num_orders"), "num_customers": tl.get("num_customers"),
+        "conversion_rate": tl.get("conversion_rate"),
+        "mainland_yesterday_gmv": mm.get("yesterday_gmv"),
+        "mainland_yesterday_orders": mm.get("yesterday_orders"),
+        "mainland_yesterday_customers": mm.get("yesterday_customers"),
+        "mainland_yesterday_gmv_per_order": mm.get("yesterday_gmv_per_order"),
+        "mainland_mtd_gmv": mm.get("mtd_gmv"), "mainland_mtd_orders": mm.get("mtd_orders"),
+        "igloo_yesterday_gmv": ig.get("yesterday_gmv"),
+        "igloo_yesterday_orders": ig.get("yesterday_orders"),
+        "igloo_mtd_gmv": ig.get("mtd_gmv"), "igloo_mtd_orders": ig.get("mtd_orders"),
+        "theplace_yesterday_gmv": tp.get("yesterday_gmv"),
+        "theplace_yesterday_orders": tp.get("yesterday_orders"),
+        "theplace_yesterday_customers": tp.get("yesterday_customers"),
+        "theplace_yesterday_gmv_per_order": tp.get("yesterday_gmv_per_order"),
+        "theplace_mtd_gmv": tp.get("mtd_gmv"), "theplace_mtd_orders": tp.get("mtd_orders"),
+        "insurance_yesterday_gmv": ins.get("yesterday_gmv"),
+        "insurance_yesterday_orders": ins.get("yesterday_orders"),
+        "insurance_mtd_gmv": ins.get("mtd_gmv"), "insurance_mtd_orders": ins.get("mtd_orders"),
+        "normal_yesterday_gmv": onl.get("yesterday_normal_gmv"),
+        "normal_yesterday_pct": onl.get("yesterday_normal_pct"),
+        "threpl_yesterday_gmv": onl.get("yesterday_3pl_gmv"),
+        "threpl_yesterday_pct": onl.get("yesterday_3pl_pct"),
+        "normal_mtd_gmv": onl.get("mtd_normal_gmv"), "normal_mtd_pct": onl.get("mtd_normal_pct"),
+        "threpl_mtd_gmv": onl.get("mtd_3pl_gmv"), "threpl_mtd_pct": onl.get("mtd_3pl_pct"),
+        "sameday_yesterday_pct": sd.get("yesterday_gmv_pct"),
+        "sameday_mtd_pct": sd.get("mtd_gmv_pct"),
+        "raw_json": raw_json,
+    }
+    cols = list(row.keys())
+    placeholders = ", ".join(["?"] * len(cols))
+    col_names = ", ".join(cols)
+    updates = ", ".join([f"{c}=excluded.{c}" for c in cols if c != "report_date"])
+    sql = f"""
+        INSERT INTO daily_dashboard ({col_names}) VALUES ({placeholders})
+        ON CONFLICT(report_date) DO UPDATE SET {updates}
+    """
+    with get_conn() as conn:
+        conn.execute(sql, list(row.values()))
+
+
+def get_daily_dashboard(report_date: str) -> dict | None:
+    sql = "SELECT * FROM daily_dashboard WHERE report_date = ?"
+    with get_conn() as conn:
+        row = conn.execute(sql, (report_date,)).fetchone()
+    return dict(row) if row else None
 
 
 def alert_sent(key: str) -> bool:
