@@ -156,11 +156,11 @@ def answer_question(question: str) -> str:
     return "Sorry, I couldn't complete the query."
 
 
-def _send_reply(text: str, chat_id: str, markdown: bool = False):
+def _send_reply(text: str, chat_id: str, parse_html: bool = False):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     payload: dict = {"chat_id": chat_id, "text": text}
-    if markdown:
-        payload["parse_mode"] = "Markdown"
+    if parse_html:
+        payload["parse_mode"] = "HTML"
     try:
         resp = requests.post(url, json=payload, timeout=10)
         data = resp.json()
@@ -204,7 +204,7 @@ def _poll_loop():
                     continue
 
                 log.info("Question from %s: %s", chat_id, text)
-                _send_reply("_Looking it up..._", chat_id, markdown=True)
+                _send_reply("<i>Looking it up...</i>", chat_id, parse_html=True)
                 threading.Thread(
                     target=_handle_question,
                     args=(text, chat_id),

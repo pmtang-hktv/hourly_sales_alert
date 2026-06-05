@@ -16,7 +16,7 @@ def send_telegram(message: str) -> bool:
     success = False
     for chat_id in TELEGRAM_ALL_CHAT_IDS:
         try:
-            resp = requests.post(url, json={"chat_id": chat_id, "text": message, "parse_mode": "Markdown"}, timeout=10)
+            resp = requests.post(url, json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"}, timeout=10)
             resp.raise_for_status()
             success = True
         except requests.RequestException as e:
