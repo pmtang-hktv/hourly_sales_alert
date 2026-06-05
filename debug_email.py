@@ -35,20 +35,9 @@ if not selected:
 
 _, data = mail.search(None, f'(SINCE "{since}" SUBJECT "Daily Sales Update")')
 ids = data[0].split()
-print(f"\nFound {len(ids)} emails")
-if not ids:
-    mail.logout()
-    exit()
-
-_, msg_data = mail.fetch(ids[-1], "(RFC822)")
-msg = emaillib.message_from_bytes(msg_data[0][1])
-print("Subject:", msg.get("Subject"))
-print()
-print("All image parts:")
-for i, part in enumerate(msg.walk()):
-    ct = part.get_content_type()
-    if "image" in ct or ct == "application/octet-stream":
-        payload = part.get_payload(decode=True)
-        size = len(payload) if payload else 0
-        print(f"  [{i}] type={ct} size={size:,} bytes filename={part.get_filename()}")
+print(f"\nFound {len(ids)} emails — listing all subjects:")
+for uid in ids:
+    _, md = mail.fetch(uid, "(BODY[HEADER.FIELDS (SUBJECT)])")
+    subj = md[0][1].decode(errors="ignore").strip()
+    print(f"  uid={uid.decode()}: {subj}")
 mail.logout()
