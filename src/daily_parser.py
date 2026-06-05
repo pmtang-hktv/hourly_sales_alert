@@ -42,7 +42,7 @@ Return ONLY a valid JSON object with exactly these keys (use null if not visible
     "mtd_customers": integer,
     "mtd_gmv_per_order": number
   },
-  "igloo_plus": {
+  "igloo_plus": {  // labeled "Plus+" or "igloo+" in the image
     "yesterday_gmv": number,
     "yesterday_orders": integer,
     "yesterday_gmv_per_order": number,
