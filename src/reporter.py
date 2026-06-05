@@ -171,7 +171,7 @@ def format_daily_dashboard_summary(row: dict, report_date: str) -> str:
 
     ig_gmv = row.get("igloo_yesterday_gmv")
     if ig_gmv:
-        lines.append("\n<b>igloo+ Sales</b>")
+        lines.append("\n<b>Plus+ Sales</b>")
         lines.append(f"Yesterday: {hkd(ig_gmv)}, {num(row.get('igloo_yesterday_orders'))} orders  (MTD: {hkd(row.get('igloo_mtd_gmv'))}, {num(row.get('igloo_mtd_orders'))} orders)")
 
     tp_gmv = row.get("theplace_yesterday_gmv")
