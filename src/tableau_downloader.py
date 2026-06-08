@@ -56,7 +56,7 @@ def _make_driver() -> webdriver.Chrome:
     return webdriver.Chrome(service=service, options=opts)
 
 
-def _wait_for_tableau(driver: webdriver.Chrome, extra: float = 3.0):
+def _wait_for_tableau(driver: webdriver.Chrome, extra: float = 2.0):
     """Wait for the Tableau viz to stop showing a loading spinner."""
     deadline = time.time() + 45
     while time.time() < deadline:
@@ -218,7 +218,7 @@ def _enter_access_key(driver: webdriver.Chrome):
     key_input.clear()
     key_input.send_keys(TABLEAU_ACCESS_KEY)
     key_input.send_keys(Keys.RETURN)
-    _wait_for_tableau(driver, extra=4)
+    _wait_for_tableau(driver, extra=2)
     log.info("Entered access key — data loaded")
 
 
@@ -233,7 +233,7 @@ def _click_category_tab(driver: webdriver.Chrome):
             tab = wait.until(EC.element_to_be_clickable((by, sel)))
             tab.click()
             log.info("Clicked Category Performance tab")
-            _wait_for_tableau(driver, extra=4)
+            _wait_for_tableau(driver, extra=2)
             return
         except TimeoutException:
             continue
@@ -272,7 +272,7 @@ def _set_date_range(driver: webdriver.Chrome, date_str: str, verify: bool = Fals
             except Exception as exc:
                 log.warning("Failed to set a date input: %s", exc)
 
-        _wait_for_tableau(driver, extra=4)
+        _wait_for_tableau(driver, extra=2)
 
         # Verify the readback
         after = [(el.get_attribute("value") or "").strip() for el in _date_inputs(driver)[:2]]
@@ -387,7 +387,7 @@ def download_category_performance() -> str | None:
         _login(driver)
 
         driver.get(f"{TABLEAU_SERVER}/views/{_WORKBOOK}/{_GP_OVERVIEW}")
-        _wait_for_tableau(driver, extra=3)
+        _wait_for_tableau(driver, extra=2)
         log.info("Loaded GP Overview view")
 
         _switch_to_viz_frame(driver)
@@ -437,7 +437,7 @@ def backfill_category_performance(dates: list) -> dict:
             # Load GP Overview, enter access key, then click the tab — same as daily job
             # This ensures the workbook-level parameter is applied correctly each time
             driver.get(f"{TABLEAU_SERVER}/views/{_WORKBOOK}/{_GP_OVERVIEW}")
-            _wait_for_tableau(driver, extra=3)
+            _wait_for_tableau(driver, extra=2)
             _switch_to_viz_frame(driver)
             _enter_access_key(driver)
             _click_category_tab(driver)
@@ -451,7 +451,7 @@ def backfill_category_performance(dates: list) -> dict:
             )
             driver.switch_to.default_content()
             driver.get(cat_url)
-            _wait_for_tableau(driver, extra=5)
+            _wait_for_tableau(driver, extra=2)
             log.info("Navigated to %s with date filter", iso)
 
             start = time.time()
