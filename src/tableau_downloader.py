@@ -127,23 +127,74 @@ def _switch_to_viz_frame(driver: webdriver.Chrome):
     log.info("No viz iframe found — operating in main frame")
 
 
-def _enter_access_key(driver: webdriver.Chrome):
-    """Type the access key into the only plain text input in the filter bar (GP Overview)."""
-    wait = WebDriverWait(driver, _WAIT)
+def _debug_dump(driver: webdriver.Chrome, label: str):
+    """Save a screenshot and log all iframes + inputs found in current frame."""
+    try:
+        path = str(Path(CATEGORY_DIR) / f"debug_{label}.png")
+        driver.save_screenshot(path)
+        log.info("Screenshot saved: %s", path)
+    except Exception as e:
+        log.info("Screenshot failed: %s", e)
+
+    iframes = driver.find_elements(By.TAG_NAME, "iframe")
+    log.info("Iframes in current frame (%s): %d", label, len(iframes))
+    for i, f in enumerate(iframes):
+        log.info("  iframe[%d] id=%s src=%s", i, f.get_attribute("id"), (f.get_attribute("src") or "")[:80])
+
+    inputs = driver.find_elements(By.TAG_NAME, "input")
+    log.info("Inputs in current frame (%s): %d", label, len(inputs))
+    for inp in inputs:
+        log.info("  input type=%s id=%s class=%s value=%s",
+                 inp.get_attribute("type"), inp.get_attribute("id"),
+                 inp.get_attribute("class"), inp.get_attribute("value"))
+
+
+def _find_access_key_input(driver: webdriver.Chrome) -> webdriver.remote.webelement.WebElement | None:
+    """Search current frame (and one level of nested iframes) for the Access Key text input."""
     strategies = [
         (By.XPATH, "//div[contains(@class,'tab-parameterControl')]//input[@type='text']"),
         (By.CSS_SELECTOR, "input.tab-parameterControl-text"),
         (By.XPATH, "//input[@type='text' and not(@disabled) and not(@readonly)]"),
         (By.CSS_SELECTOR, "input[type='text']"),
     ]
-    key_input = None
+
+    # Try in the current frame first
     for by, sel in strategies:
         try:
-            key_input = wait.until(EC.element_to_be_clickable((by, sel)))
-            log.info("Found Access Key input via: %s", sel)
-            break
+            el = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((by, sel)))
+            log.info("Found Access Key input in current frame via: %s", sel)
+            return el
         except TimeoutException:
             continue
+
+    # Try each nested iframe
+    iframes = driver.find_elements(By.TAG_NAME, "iframe")
+    log.info("Searching %d nested iframes for Access Key input", len(iframes))
+    for i, frame in enumerate(iframes):
+        try:
+            driver.switch_to.frame(frame)
+            for by, sel in strategies:
+                try:
+                    el = WebDriverWait(driver, 4).until(EC.element_to_be_clickable((by, sel)))
+                    log.info("Found Access Key input in nested iframe[%d] via: %s", i, sel)
+                    return el
+                except TimeoutException:
+                    continue
+            driver.switch_to.parent_frame()
+        except Exception as exc:
+            log.info("Could not search iframe[%d]: %s", i, exc)
+            try:
+                driver.switch_to.parent_frame()
+            except Exception:
+                pass
+
+    return None
+
+
+def _enter_access_key(driver: webdriver.Chrome):
+    """Type the access key into the only plain text input in the filter bar (GP Overview)."""
+    _debug_dump(driver, "before_access_key")
+    key_input = _find_access_key_input(driver)
     if key_input is None:
         raise RuntimeError("Could not find Access Key input field")
 
