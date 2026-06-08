@@ -225,39 +225,51 @@ def _click_category_tab(driver: webdriver.Chrome):
     raise RuntimeError("Could not find the Category Performance tab")
 
 
-def _set_date_range(driver: webdriver.Chrome, date_str: str):
-    """Set the from and to date fields to date_str using JavaScript.
+def _date_inputs(driver: webdriver.Chrome) -> list:
+    """Return the from/to date filter inputs (those holding a DD/MM/YYYY value)."""
+    inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='text']")
+    return [el for el in inputs if _DATE_RE.match((el.get_attribute("value") or "").strip())]
 
-    Non-fatal: the Category Performance tab defaults to yesterday, so this
-    is a safety measure only. Logs a warning if it can't set the values.
+
+def _set_date_range(driver: webdriver.Chrome, date_str: str, verify: bool = False) -> bool:
+    """Set both the from and to date fields to date_str by typing into them.
+
+    Returns True if the inputs read back as date_str afterwards. When verify=True
+    and the readback does not match, returns False so the caller can skip saving a
+    wrongly-dated file (important for backfill).
     """
     try:
-        inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='text']")
-        date_inputs = [
-            el for el in inputs
-            if _DATE_RE.match((el.get_attribute("value") or "").strip())
-        ]
+        date_inputs = _date_inputs(driver)
         if not date_inputs:
             log.info("No date inputs found — relying on dashboard default (%s)", date_str)
-            return
-        for el in date_inputs[:2]:
+            return not verify  # default is fine for "yesterday" runs, not for backfill
+
+        for el in date_inputs[:2]:  # from, then to
             try:
-                driver.execute_script(
-                    """
-                    arguments[0].value = arguments[1];
-                    arguments[0].dispatchEvent(new Event('input', {bubbles: true}));
-                    arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
-                    """,
-                    el, date_str,
-                )
+                el.click()
+                # Select-all works cross-platform with both modifiers sent
+                el.send_keys(Keys.CONTROL, "a")
+                el.send_keys(Keys.COMMAND, "a")
+                el.send_keys(Keys.DELETE)
+                el.send_keys(date_str)
                 el.send_keys(Keys.RETURN)
-                time.sleep(1)
+                time.sleep(1.5)
             except Exception as exc:
                 log.warning("Failed to set a date input: %s", exc)
-        _wait_for_tableau(driver, extra=3)
-        log.info("Set date range to %s", date_str)
+
+        _wait_for_tableau(driver, extra=4)
+
+        # Verify the readback
+        after = [(el.get_attribute("value") or "").strip() for el in _date_inputs(driver)[:2]]
+        ok = all(v == date_str for v in after) if after else False
+        if ok:
+            log.info("Set date range to %s (verified)", date_str)
+        else:
+            log.warning("Date range readback mismatch — wanted %s, got %s", date_str, after)
+        return ok
     except Exception as exc:
-        log.warning("Could not set date range — continuing with default: %s", exc)
+        log.warning("Could not set date range (%s): %s", date_str, exc)
+        return False
 
 
 def _download_crosstab(driver: webdriver.Chrome):
@@ -377,6 +389,60 @@ def download_category_performance() -> str | None:
     except Exception as exc:
         log.error("Tableau download failed: %s", exc, exc_info=True)
         return None
+    finally:
+        if driver:
+            driver.quit()
+
+
+def backfill_category_performance(dates: list) -> dict:
+    """Download Category Performance for each date in `dates` (list of date objects),
+    reusing a single browser session. Returns {iso_date: path_or_None}.
+
+    Each date is set on the filter and VERIFIED before the file is saved, so a date
+    that fails to apply is skipped rather than saved with the wrong day's data.
+    """
+    results: dict = {}
+    if not all([TABLEAU_SERVER, TABLEAU_USERNAME, TABLEAU_PASSWORD, TABLEAU_ACCESS_KEY]):
+        log.warning("Tableau credentials not configured — skipping backfill")
+        return results
+
+    os.makedirs(CATEGORY_DIR, exist_ok=True)
+    driver = None
+    try:
+        driver = _make_driver()
+        _login(driver)
+        driver.get(f"{TABLEAU_SERVER}/views/{_WORKBOOK}/{_GP_OVERVIEW}")
+        _wait_for_tableau(driver, extra=3)
+        log.info("Loaded GP Overview view")
+
+        _switch_to_viz_frame(driver)
+        _enter_access_key(driver)
+        _click_category_tab(driver)
+
+        for d in dates:
+            iso = d.strftime("%Y-%m-%d")
+            date_str = f"{d.day:02d}/{d.month:02d}/{d.year}"
+            log.info("--- Backfilling %s ---", iso)
+            start = time.time()
+            if not _set_date_range(driver, date_str, verify=True):
+                log.error("Skipping %s — could not set/verify date filter", iso)
+                results[iso] = None
+                continue
+            try:
+                _download_crosstab(driver)
+                path = _wait_for_download(since=start, date_str=iso)
+                results[iso] = path
+                if not path:
+                    log.error("Download timed out for %s", iso)
+            except Exception as exc:
+                log.error("Download failed for %s: %s", iso, exc)
+                results[iso] = None
+            time.sleep(2)
+
+        return results
+    except Exception as exc:
+        log.error("Backfill failed: %s", exc, exc_info=True)
+        return results
     finally:
         if driver:
             driver.quit()
