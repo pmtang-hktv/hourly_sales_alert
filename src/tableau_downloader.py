@@ -146,25 +146,20 @@ def _debug_dump(driver: webdriver.Chrome, label: str):
 
     inputs = driver.find_elements(By.TAG_NAME, "input")
     log.info("Inputs in current frame (%s): %d", label, len(inputs))
-    for inp in inputs:
-        log.info("  input type=%s id=%s class=%s value=%s",
-                 inp.get_attribute("type"), inp.get_attribute("id"),
-                 inp.get_attribute("class"), inp.get_attribute("value"))
-
-    # Log clickable elements whose text looks like a date (for calendar picker diagnosis)
-    _DATE_TEXT_RE = re.compile(r"\d{4}/\d{1,2}/\d{1,2}")
-    candidates = driver.find_elements(By.XPATH, "//*[not(self::script)][not(self::style)]")
-    date_els = []
-    for el in candidates:
+    for i, inp in enumerate(inputs):
         try:
-            txt = (el.get_attribute("textContent") or "").strip()
-            if _DATE_TEXT_RE.fullmatch(txt):
-                date_els.append((el.tag_name, el.get_attribute("class") or "", txt))
-        except Exception:
-            pass
-    log.info("Date-text elements in frame (%s): %d", label, len(date_els))
-    for tag, cls, txt in date_els[:20]:
-        log.info("  <%s class=%r> %s", tag, cls, txt)
+            rect = inp.rect
+            parent_html = driver.execute_script(
+                "return arguments[0].parentElement ? arguments[0].parentElement.outerHTML : '';", inp
+            )[:300]
+            log.info(
+                "  input[%d] type=%s class=%s value=%s displayed=%s enabled=%s readonly=%s rect=%s",
+                i, inp.get_attribute("type"), inp.get_attribute("class"), inp.get_attribute("value"),
+                inp.is_displayed(), inp.is_enabled(), inp.get_attribute("readonly"), rect,
+            )
+            log.info("      parentHTML[%d]: %s", i, parent_html)
+        except Exception as e:
+            log.info("  input[%d] inspect failed: %s", i, e)
 
 
 def _find_access_key_input(driver: webdriver.Chrome) -> webdriver.remote.webelement.WebElement | None:
