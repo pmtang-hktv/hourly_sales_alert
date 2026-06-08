@@ -27,7 +27,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
-from src.config import CATEGORY_DIR, TABLEAU_ACCESS_KEY, TABLEAU_PASSWORD, TABLEAU_SERVER, TABLEAU_USERNAME
+from src.config import CATEGORY_DIR, TABLEAU_ACCESS_KEY, TABLEAU_HEADLESS, TABLEAU_PASSWORD, TABLEAU_SERVER, TABLEAU_USERNAME
 
 log = logging.getLogger(__name__)
 
@@ -41,7 +41,8 @@ _DATE_RE = re.compile(r"^\d{4}/\d{1,2}/\d{1,2}$")
 def _make_driver() -> webdriver.Chrome:
     abs_dir = str(Path(CATEGORY_DIR).resolve())
     opts = Options()
-    opts.add_argument("--headless=new")
+    if TABLEAU_HEADLESS:
+        opts.add_argument("--headless=new")
     opts.add_argument("--no-sandbox")
     opts.add_argument("--disable-dev-shm-usage")
     opts.add_argument("--window-size=1920,1080")
