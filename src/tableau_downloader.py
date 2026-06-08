@@ -317,8 +317,8 @@ def _download_crosstab(driver: webdriver.Chrome):
     raise RuntimeError("Could not find the 下載/Download button in the crosstab dialog")
 
 
-def _wait_for_download(since: float) -> str | None:
-    """Wait for a new xlsx to finish downloading in CATEGORY_DIR."""
+def _wait_for_download(since: float, date_str: str) -> str | None:
+    """Wait for a new xlsx to finish downloading, then rename it to include the data date."""
     deadline = time.time() + _DOWNLOAD_TIMEOUT
     while time.time() < deadline:
         # An in-progress Chrome download leaves a .crdownload file
@@ -335,8 +335,10 @@ def _wait_for_download(since: float) -> str | None:
             time.sleep(2)
             size2 = os.path.getsize(newest)
             if size1 == size2 > 0:
-                log.info("Downloaded: %s (%d bytes)", newest, size2)
-                return newest
+                target = os.path.join(CATEGORY_DIR, f"category_performance_{date_str}.xlsx")
+                os.replace(newest, target)
+                log.info("Downloaded and renamed to: %s (%d bytes)", target, size2)
+                return target
         time.sleep(2)
     return None
 
@@ -350,6 +352,7 @@ def download_category_performance() -> str | None:
     os.makedirs(CATEGORY_DIR, exist_ok=True)
     d = datetime.now() - timedelta(days=1)
     date_str = f"{d.day:02d}/{d.month:02d}/{d.year}"  # Tableau display format e.g. 07/06/2026
+    file_date = d.strftime("%Y-%m-%d")  # for filename e.g. 2026-06-07
     start = time.time()
     driver = None
     try:
@@ -366,7 +369,7 @@ def download_category_performance() -> str | None:
         _set_date_range(driver, date_str)
         _download_crosstab(driver)
 
-        path = _wait_for_download(since=start)
+        path = _wait_for_download(since=start, date_str=file_date)
         if not path:
             log.error("Download timed out after %ds", _DOWNLOAD_TIMEOUT)
         return path
