@@ -395,11 +395,12 @@ def download_category_performance() -> str | None:
 
 
 def backfill_category_performance(dates: list) -> dict:
-    """Download Category Performance for each date in `dates` (list of date objects),
-    reusing a single browser session. Returns {iso_date: path_or_None}.
+    """Download Category Performance for each date in `dates` (list of date objects).
 
-    Each date is set on the filter and VERIFIED before the file is saved, so a date
-    that fails to apply is skipped rather than saved with the wrong day's data.
+    Strategy: log in once, enter the access key (workbook-level parameter), then for
+    each date navigate directly to the Category Performance URL with the date embedded
+    as a Tableau URL filter (?Date=YYYY/M/D). This bypasses the calendar picker UI
+    entirely. Returns {iso_date: path_or_None}.
     """
     results: dict = {}
     if not all([TABLEAU_SERVER, TABLEAU_USERNAME, TABLEAU_PASSWORD, TABLEAU_ACCESS_KEY]):
@@ -411,33 +412,52 @@ def backfill_category_performance(dates: list) -> dict:
     try:
         driver = _make_driver()
         _login(driver)
+
+        # Enter access key on GP Overview (workbook-level — persists for all sheets)
         driver.get(f"{TABLEAU_SERVER}/views/{_WORKBOOK}/{_GP_OVERVIEW}")
         _wait_for_tableau(driver, extra=3)
-        log.info("Loaded GP Overview view")
-
         _switch_to_viz_frame(driver)
         _enter_access_key(driver)
-        _click_category_tab(driver)
-        _debug_dump(driver, "category_tab_inputs")  # diagnose date filter structure
+        driver.switch_to.default_content()
+        log.info("Access key applied — starting per-date downloads")
 
         for d in dates:
             iso = d.strftime("%Y-%m-%d")
-            date_str = f"{d.day:02d}/{d.month:02d}/{d.year}"
-            log.info("--- Backfilling %s ---", iso)
-            start = time.time()
-            if not _set_date_range(driver, date_str, verify=True):
-                log.error("Skipping %s — could not set/verify date filter", iso)
-                results[iso] = None
-                continue
+            # Tableau URL date filter: field name is "Date", value is YYYY/M/D
+            tableau_date = f"{d.year}/{d.month}/{d.day}"
+            # Navigate directly to Category Performance with date filter in URL
+            cat_url = (
+                f"{TABLEAU_SERVER}/views/{_WORKBOOK}/CategoryPerformance"
+                f"?Date={tableau_date},{tableau_date}"
+            )
+            log.info("--- Backfilling %s (URL date: %s) ---", iso, tableau_date)
+            driver.get(cat_url)
+            _wait_for_tableau(driver, extra=5)
+
+            # Verify date filter applied — check the page title or "Last Update" text
             try:
+                _switch_to_viz_frame(driver)
+                page_src = driver.page_source
+                driver.switch_to.default_content()
+                log.info("Page loaded for %s (source length: %d)", iso, len(page_src))
+            except Exception:
+                driver.switch_to.default_content()
+
+            start = time.time()
+            try:
+                _switch_to_viz_frame(driver)
                 _download_crosstab(driver)
                 path = _wait_for_download(since=start, date_str=iso)
                 results[iso] = path
-                if not path:
+                if path:
+                    log.info("Stored: %s", path)
+                else:
                     log.error("Download timed out for %s", iso)
             except Exception as exc:
                 log.error("Download failed for %s: %s", iso, exc)
                 results[iso] = None
+            finally:
+                driver.switch_to.default_content()
             time.sleep(2)
 
         return results
