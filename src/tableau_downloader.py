@@ -41,6 +41,9 @@ _DATE_RE = re.compile(r"^\d{1,2}/\d{1,2}/\d{4}$")
 def _make_driver() -> webdriver.Chrome:
     abs_dir = str(Path(CATEGORY_DIR).resolve())
     opts = Options()
+    # Return from driver.get() on DOMContentLoaded instead of full page load —
+    # Tableau's pages keep loading resources long after the page is usable
+    opts.page_load_strategy = "eager"
     if TABLEAU_HEADLESS:
         opts.add_argument("--headless=new")
     opts.add_argument("--no-sandbox")
