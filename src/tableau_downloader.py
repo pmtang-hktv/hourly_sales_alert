@@ -35,7 +35,7 @@ _WAIT = 30
 _DOWNLOAD_TIMEOUT = 120
 _WORKBOOK = "RMDashboard-GPReport"
 _GP_OVERVIEW = "GPOverview"
-_DATE_RE = re.compile(r"^\d{4}/\d{1,2}/\d{1,2}$")
+_DATE_RE = re.compile(r"^\d{1,2}/\d{1,2}/\d{4}$")
 
 
 def _make_driver() -> webdriver.Chrome:
@@ -151,14 +151,15 @@ def _debug_dump(driver: webdriver.Chrome, label: str):
 
 def _find_access_key_input(driver: webdriver.Chrome) -> webdriver.remote.webelement.WebElement | None:
     """Search current frame (and one level of nested iframes) for the Access Key text input."""
+    # Try in the current frame first
     strategies = [
+        (By.CSS_SELECTOR, "input.QueryBox"),
+        (By.XPATH, "//input[contains(@class,'QueryBox')]"),
         (By.XPATH, "//div[contains(@class,'tab-parameterControl')]//input[@type='text']"),
         (By.CSS_SELECTOR, "input.tab-parameterControl-text"),
         (By.XPATH, "//input[@type='text' and not(@disabled) and not(@readonly)]"),
         (By.CSS_SELECTOR, "input[type='text']"),
     ]
-
-    # Try in the current frame first
     for by, sel in strategies:
         try:
             el = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((by, sel)))
@@ -353,7 +354,7 @@ def download_category_performance() -> str | None:
 
     os.makedirs(CATEGORY_DIR, exist_ok=True)
     d = datetime.now() - timedelta(days=1)
-    date_str = f"{d.year}/{d.month}/{d.day}"  # Tableau display format e.g. 2026/6/7
+    date_str = f"{d.day:02d}/{d.month:02d}/{d.year}"  # Tableau display format e.g. 07/06/2026
     start = time.time()
     driver = None
     try:
