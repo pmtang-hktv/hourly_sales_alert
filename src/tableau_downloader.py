@@ -412,36 +412,30 @@ def backfill_category_performance(dates: list) -> dict:
     try:
         driver = _make_driver()
         _login(driver)
-
-        # Enter access key on GP Overview (workbook-level — persists for all sheets)
-        driver.get(f"{TABLEAU_SERVER}/views/{_WORKBOOK}/{_GP_OVERVIEW}")
-        _wait_for_tableau(driver, extra=3)
-        _switch_to_viz_frame(driver)
-        _enter_access_key(driver)
-        driver.switch_to.default_content()
-        log.info("Access key applied — starting per-date downloads")
+        log.info("Logged in — starting per-date downloads")
 
         for d in dates:
             iso = d.strftime("%Y-%m-%d")
-            # Tableau URL date filter: field name is "Date", value is YYYY/M/D
             tableau_date = f"{d.year}/{d.month}/{d.day}"
-            # Navigate directly to Category Performance with date filter in URL
+            log.info("--- Backfilling %s (URL date: %s) ---", iso, tableau_date)
+
+            # Load GP Overview, enter access key, then click the tab — same as daily job
+            # This ensures the workbook-level parameter is applied correctly each time
+            driver.get(f"{TABLEAU_SERVER}/views/{_WORKBOOK}/{_GP_OVERVIEW}")
+            _wait_for_tableau(driver, extra=3)
+            _switch_to_viz_frame(driver)
+            _enter_access_key(driver)
+            _click_category_tab(driver)
+
+            # Now set the date via URL navigation, keeping the session cookie intact
             cat_url = (
                 f"{TABLEAU_SERVER}/views/{_WORKBOOK}/CategoryPerformance"
                 f"?Date={tableau_date},{tableau_date}"
             )
-            log.info("--- Backfilling %s (URL date: %s) ---", iso, tableau_date)
+            driver.switch_to.default_content()
             driver.get(cat_url)
             _wait_for_tableau(driver, extra=5)
-
-            # Verify date filter applied — check the page title or "Last Update" text
-            try:
-                _switch_to_viz_frame(driver)
-                page_src = driver.page_source
-                driver.switch_to.default_content()
-                log.info("Page loaded for %s (source length: %d)", iso, len(page_src))
-            except Exception:
-                driver.switch_to.default_content()
+            log.info("Navigated to %s with date filter", iso)
 
             start = time.time()
             try:
