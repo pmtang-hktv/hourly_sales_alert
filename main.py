@@ -8,6 +8,8 @@ Schedule:
   08:15                — fetch daily dashboard email, extract via Vision, send summary
   15:00                — parse latest category performance xlsx, send summary
 """
+from __future__ import annotations
+
 import logging
 from datetime import datetime, timedelta
 
