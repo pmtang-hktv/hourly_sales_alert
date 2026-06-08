@@ -238,47 +238,57 @@ def _click_category_tab(driver: webdriver.Chrome):
     raise RuntimeError("Could not find the Category Performance tab")
 
 
-def _date_inputs(driver: webdriver.Chrome) -> list:
-    """Return the from/to date filter inputs (those holding a DD/MM/YYYY value)."""
-    inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='text']")
-    return [el for el in inputs if _DATE_RE.match((el.get_attribute("value") or "").strip())]
+def _readout_text(driver: webdriver.Chrome, bound: str) -> str:
+    """Return the displayed text of a range-date bound ('Lower' or 'Upper')."""
+    try:
+        el = driver.find_element(By.CSS_SELECTOR, f"div.QF{bound}Bound .readoutText")
+        return (el.text or el.get_attribute("textContent") or "").strip()
+    except Exception:
+        return ""
+
+
+def _set_one_bound(driver: webdriver.Chrome, bound: str, date_str: str):
+    """Set a single range-date bound. bound is 'Lower' or 'Upper'.
+
+    The bound is a QFReadout div with onclick:show{Lower|Upper}Input — clicking it
+    reveals the hidden <input>; we then clear and type the date.
+    """
+    readout = WebDriverWait(driver, 15).until(
+        EC.presence_of_element_located((By.CSS_SELECTOR, f"div.QF{bound}Bound"))
+    )
+    driver.execute_script("arguments[0].click();", readout)  # fires show{Bound}Input
+    time.sleep(0.6)
+    inp = readout.find_element(By.TAG_NAME, "input")
+    WebDriverWait(driver, 8).until(lambda d: inp.is_displayed())
+    inp.send_keys(Keys.CONTROL, "a")
+    inp.send_keys(Keys.COMMAND, "a")  # macOS select-all
+    inp.send_keys(Keys.DELETE)
+    inp.send_keys(date_str)
+    inp.send_keys(Keys.RETURN)
+    time.sleep(1)
 
 
 def _set_date_range(driver: webdriver.Chrome, date_str: str, verify: bool = False) -> bool:
-    """Set both the from and to date fields to date_str by typing into them.
+    """Set both bounds of the range-date filter to date_str (DD/MM/YYYY).
 
-    Returns True if the inputs read back as date_str afterwards. When verify=True
-    and the readback does not match, returns False so the caller can skip saving a
-    wrongly-dated file (important for backfill).
+    Returns True if both readouts show date_str afterwards. When verify=True and the
+    readback doesn't match, returns False so the caller can skip a wrongly-dated file.
     """
     try:
-        date_inputs = _date_inputs(driver)
-        if not date_inputs:
-            log.info("No date inputs found — relying on dashboard default (%s)", date_str)
-            return not verify  # default is fine for "yesterday" runs, not for backfill
-
-        for el in date_inputs[:2]:  # from, then to
+        for bound in ("Lower", "Upper"):
             try:
-                el.click()
-                # Select-all works cross-platform with both modifiers sent
-                el.send_keys(Keys.CONTROL, "a")
-                el.send_keys(Keys.COMMAND, "a")
-                el.send_keys(Keys.DELETE)
-                el.send_keys(date_str)
-                el.send_keys(Keys.RETURN)
-                time.sleep(1.5)
+                _set_one_bound(driver, bound, date_str)
             except Exception as exc:
-                log.warning("Failed to set a date input: %s", exc)
+                log.warning("Failed to set %s bound: %s", bound, exc)
 
         _wait_for_tableau(driver, extra=2)
 
-        # Verify the readback
-        after = [(el.get_attribute("value") or "").strip() for el in _date_inputs(driver)[:2]]
-        ok = all(v == date_str for v in after) if after else False
+        lower, upper = _readout_text(driver, "Lower"), _readout_text(driver, "Upper")
+        ok = (lower == date_str and upper == date_str)
         if ok:
             log.info("Set date range to %s (verified)", date_str)
         else:
-            log.warning("Date range readback mismatch — wanted %s, got %s", date_str, after)
+            log.warning("Date range readback mismatch — wanted %s, got [%s, %s]", date_str, lower, upper)
         return ok
     except Exception as exc:
         log.warning("Could not set date range (%s): %s", date_str, exc)
@@ -391,7 +401,9 @@ def download_category_performance() -> str | None:
         _switch_to_viz_frame(driver)
         _enter_access_key(driver)
         _click_category_tab(driver)
-        _set_date_range(driver, date_str)
+        if not _set_date_range(driver, date_str, verify=True):
+            log.error("Could not set date filter to %s — aborting to avoid wrong-day data", date_str)
+            return None
         _download_crosstab(driver)
 
         path = _wait_for_download(since=start, date_str=file_date)
@@ -410,10 +422,10 @@ def download_category_performance() -> str | None:
 def backfill_category_performance(dates: list) -> dict:
     """Download Category Performance for each date in `dates` (list of date objects).
 
-    Strategy: log in once, enter the access key (workbook-level parameter), then for
-    each date navigate directly to the Category Performance URL with the date embedded
-    as a Tableau URL filter (?Date=YYYY/M/D). This bypasses the calendar picker UI
-    entirely. Returns {iso_date: path_or_None}.
+    Strategy: log in once, enter the access key and open the Category Performance tab
+    once, then for each date set the range-date filter (both bounds) to that day,
+    verify it applied, and download. The access key parameter persists across filter
+    changes, so no reload is needed between dates. Returns {iso_date: path_or_None}.
     """
     results: dict = {}
     if not all([TABLEAU_SERVER, TABLEAU_USERNAME, TABLEAU_PASSWORD, TABLEAU_ACCESS_KEY]):
@@ -425,36 +437,26 @@ def backfill_category_performance(dates: list) -> dict:
     try:
         driver = _make_driver()
         _login(driver)
-        log.info("Logged in — starting per-date downloads")
+
+        driver.get(f"{TABLEAU_SERVER}/views/{_WORKBOOK}/{_GP_OVERVIEW}")
+        _wait_for_tableau(driver, extra=2)
+        _switch_to_viz_frame(driver)
+        _enter_access_key(driver)
+        _click_category_tab(driver)
+        log.info("Access key applied, Category Performance tab open — starting per-date loop")
 
         for d in dates:
             iso = d.strftime("%Y-%m-%d")
-            tableau_date = f"{d.year}/{d.month}/{d.day}"
-            log.info("--- Backfilling %s (URL date: %s) ---", iso, tableau_date)
+            date_str = f"{d.day:02d}/{d.month:02d}/{d.year}"  # DD/MM/YYYY
+            log.info("--- Backfilling %s ---", iso)
 
-            # Load GP Overview, enter access key, then click the tab — same as daily job
-            # This ensures the workbook-level parameter is applied correctly each time
-            driver.get(f"{TABLEAU_SERVER}/views/{_WORKBOOK}/{_GP_OVERVIEW}")
-            _wait_for_tableau(driver, extra=2)
-            _switch_to_viz_frame(driver)
-            _enter_access_key(driver)
-            _click_category_tab(driver)
-            if not TABLEAU_HEADLESS:
-                _debug_dump(driver, f"cat_date_els_{iso}")
-
-            # Now set the date via URL navigation, keeping the session cookie intact
-            cat_url = (
-                f"{TABLEAU_SERVER}/views/{_WORKBOOK}/CategoryPerformance"
-                f"?Date={tableau_date},{tableau_date}"
-            )
-            driver.switch_to.default_content()
-            driver.get(cat_url)
-            _wait_for_tableau(driver, extra=2)
-            log.info("Navigated to %s with date filter", iso)
+            if not _set_date_range(driver, date_str, verify=True):
+                log.error("Skipping %s — could not set/verify date filter", iso)
+                results[iso] = None
+                continue
 
             start = time.time()
             try:
-                _switch_to_viz_frame(driver)
                 _download_crosstab(driver)
                 path = _wait_for_download(since=start, date_str=iso)
                 results[iso] = path
@@ -465,8 +467,6 @@ def backfill_category_performance(dates: list) -> dict:
             except Exception as exc:
                 log.error("Download failed for %s: %s", iso, exc)
                 results[iso] = None
-            finally:
-                driver.switch_to.default_content()
             time.sleep(2)
 
         return results
