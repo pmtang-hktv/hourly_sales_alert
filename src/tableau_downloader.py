@@ -194,7 +194,8 @@ def _find_access_key_input(driver: webdriver.Chrome) -> webdriver.remote.webelem
 
 def _enter_access_key(driver: webdriver.Chrome):
     """Type the access key into the only plain text input in the filter bar (GP Overview)."""
-    _debug_dump(driver, "before_access_key")
+    if not TABLEAU_HEADLESS:
+        _debug_dump(driver, "before_access_key")
     key_input = _find_access_key_input(driver)
     if key_input is None:
         raise RuntimeError("Could not find Access Key input field")
@@ -225,44 +226,38 @@ def _click_category_tab(driver: webdriver.Chrome):
 
 
 def _set_date_range(driver: webdriver.Chrome, date_str: str):
-    """Set both the from and to date fields of the range-date filter to date_str.
+    """Set the from and to date fields to date_str using JavaScript.
 
-    Tableau's range date filter renders the from/to dates as editable text inputs
-    that currently hold values like '2026/6/7'. We locate inputs whose value looks
-    like a date and overwrite both. Non-fatal: if the dashboard already defaults to
-    yesterday this is a harmless no-op; we log and continue on failure.
+    Non-fatal: the Category Performance tab defaults to yesterday, so this
+    is a safety measure only. Logs a warning if it can't set the values.
     """
     try:
         inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='text']")
-        date_inputs = []
-        for el in inputs:
-            try:
-                val = (el.get_attribute("value") or "").strip()
-                if _DATE_RE.match(val):
-                    date_inputs.append(el)
-            except Exception:
-                continue
-
+        date_inputs = [
+            el for el in inputs
+            if _DATE_RE.match((el.get_attribute("value") or "").strip())
+        ]
         if not date_inputs:
-            log.warning("No date-range inputs found — relying on dashboard default (%s)", date_str)
+            log.info("No date inputs found — relying on dashboard default (%s)", date_str)
             return
-
-        for el in date_inputs[:2]:  # from, then to
+        for el in date_inputs[:2]:
             try:
-                el.click()
-                el.send_keys(Keys.CONTROL, "a")
-                el.send_keys(Keys.COMMAND, "a")  # macOS
-                el.send_keys(Keys.DELETE)
-                el.send_keys(date_str)
+                driver.execute_script(
+                    """
+                    arguments[0].value = arguments[1];
+                    arguments[0].dispatchEvent(new Event('input', {bubbles: true}));
+                    arguments[0].dispatchEvent(new Event('change', {bubbles: true}));
+                    """,
+                    el, date_str,
+                )
                 el.send_keys(Keys.RETURN)
-                time.sleep(1.5)
+                time.sleep(1)
             except Exception as exc:
                 log.warning("Failed to set a date input: %s", exc)
-
-        _wait_for_tableau(driver, extra=4)
+        _wait_for_tableau(driver, extra=3)
         log.info("Set date range to %s", date_str)
     except Exception as exc:
-        log.warning("Could not set date range (%s) — continuing with default: %s", date_str, exc)
+        log.warning("Could not set date range — continuing with default: %s", exc)
 
 
 def _download_crosstab(driver: webdriver.Chrome):
