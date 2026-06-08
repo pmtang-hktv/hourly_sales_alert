@@ -418,6 +418,7 @@ def backfill_category_performance(dates: list) -> dict:
         _switch_to_viz_frame(driver)
         _enter_access_key(driver)
         _click_category_tab(driver)
+        _debug_dump(driver, "category_tab_inputs")  # diagnose date filter structure
 
         for d in dates:
             iso = d.strftime("%Y-%m-%d")
