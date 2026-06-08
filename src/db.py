@@ -97,6 +97,26 @@ CREATE TABLE IF NOT EXISTS daily_dashboard (
     created_at               TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS category_performance (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_date  TEXT NOT NULL,
+    main_cat     TEXT,
+    sub_cat1     TEXT,
+    sub_cat2     TEXT,
+    sub_cat3     TEXT,
+    sub_cat4     TEXT,
+    leaf_cat     TEXT,
+    level        INTEGER,
+    gmv          REAL,
+    gp           REAL,
+    gp_pct       REAL,
+    created_at   TEXT DEFAULT (datetime('now')),
+    UNIQUE(report_date, main_cat, sub_cat1, sub_cat2, sub_cat3, sub_cat4)
+);
+
+CREATE INDEX IF NOT EXISTS idx_cat_date ON category_performance(report_date);
+CREATE INDEX IF NOT EXISTS idx_cat_main ON category_performance(main_cat);
+
 CREATE TABLE IF NOT EXISTS alerts_log (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     alert_key  TEXT NOT NULL UNIQUE,
@@ -258,6 +278,58 @@ def get_daily_dashboard(report_date: str) -> dict | None:
     with get_conn() as conn:
         row = conn.execute(sql, (report_date,)).fetchone()
     return dict(row) if row else None
+
+
+def upsert_category_rows(report_date: str, rows: list[dict]):
+    """Replace all category rows for a date, then bulk-insert the new set."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM category_performance WHERE report_date = ?", (report_date,))
+        conn.executemany(
+            """INSERT INTO category_performance
+               (report_date, main_cat, sub_cat1, sub_cat2, sub_cat3, sub_cat4,
+                leaf_cat, level, gmv, gp, gp_pct)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                (report_date, r["main_cat"], r["sub_cat1"], r["sub_cat2"],
+                 r["sub_cat3"], r["sub_cat4"], r["leaf_cat"], r["level"],
+                 r["gmv"], r["gp"], r["gp_pct"])
+                for r in rows
+            ],
+        )
+
+
+def get_category_main_totals(report_date: str) -> list[dict]:
+    """GMV / GP aggregated to main category for a given date."""
+    sql = """
+        SELECT main_cat,
+               SUM(gmv) AS gmv,
+               SUM(gp)  AS gp,
+               CASE WHEN SUM(gmv) > 0 THEN SUM(gp) / SUM(gmv) ELSE 0 END AS gp_pct
+        FROM category_performance
+        WHERE report_date = ?
+        GROUP BY main_cat
+        ORDER BY gmv DESC
+    """
+    with get_conn() as conn:
+        return [dict(r) for r in conn.execute(sql, (report_date,)).fetchall()]
+
+
+def get_category_low_margin(report_date: str, min_gmv: float = 5000, max_gp_pct: float = 0.0) -> list[dict]:
+    """Leaf categories with meaningful GMV but margin at or below a threshold."""
+    sql = """
+        SELECT leaf_cat, main_cat, gmv, gp, gp_pct
+        FROM category_performance
+        WHERE report_date = ? AND gmv >= ? AND gp_pct <= ?
+        ORDER BY gmv DESC
+    """
+    with get_conn() as conn:
+        return [dict(r) for r in conn.execute(sql, (report_date, min_gmv, max_gp_pct)).fetchall()]
+
+
+def get_category_dates() -> list[str]:
+    sql = "SELECT DISTINCT report_date FROM category_performance ORDER BY report_date DESC"
+    with get_conn() as conn:
+        return [r[0] for r in conn.execute(sql).fetchall()]
 
 
 def alert_sent(key: str) -> bool:

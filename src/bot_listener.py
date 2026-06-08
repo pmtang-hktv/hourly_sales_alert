@@ -52,6 +52,19 @@ Table: daily_dashboard  — one row per report_date (from morning dashboard emai
   normal_yesterday_gmv, normal_yesterday_pct, threpl_yesterday_gmv, threpl_yesterday_pct  (Online Normal vs 3PL)
   normal_mtd_gmv, normal_mtd_pct, threpl_mtd_gmv, threpl_mtd_pct
   sameday_yesterday_pct, sameday_mtd_pct  REAL  percentage of GMV from same-day delivery merchants
+
+Table: category_performance  — one row per (report_date, category leaf) from the daily Tableau export
+  report_date  TEXT  YYYY-MM-DD
+  main_cat     TEXT  top-level category (Chinese), e.g. 超級市場, 護膚化妝, 大腦場
+  sub_cat1, sub_cat2, sub_cat3, sub_cat4  TEXT  sub-category levels (Chinese; '' if not applicable)
+  leaf_cat     TEXT  the deepest non-empty category name for this row
+  level        INTEGER  depth of leaf (1=main … 5=sub_cat4)
+  gmv          REAL  gross merchandise value in HKD for this leaf category
+  gp           REAL  gross profit in HKD
+  gp_pct       REAL  gross profit margin as a fraction (0.05 = 5%), after rebate
+  Notes: each row is a distinct leaf — summing gmv across rows gives the total (no subtotal rows).
+  To get main-category totals: SUM(gmv) GROUP BY main_cat.
+  Category names are in Traditional Chinese — match user terms to these (e.g. "supermarket"=超級市場).
 """
 
 _SYSTEM = [

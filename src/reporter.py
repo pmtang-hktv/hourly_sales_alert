@@ -145,6 +145,41 @@ def _pct(part, total) -> str:
     return f"{part / total * 100:.1f}%"
 
 
+def format_category_summary(data: dict) -> str:
+    rd = _fmt_date(data["report_date"])
+    total_gmv = data["total_gmv"]
+    total_gp = data["total_gp"]
+    gp_pct = data["total_gp_pct"] * 100
+
+    lines = [f"🗂️ <b>Category Performance — {rd}</b>", ""]
+    lines.append(f"Total GMV: <b>HKD {total_gmv:,.0f}</b>")
+    lines.append(f"Total GP:  <b>HKD {total_gp:,.0f}</b> ({gp_pct:.1f}%)")
+
+    # Top categories by GMV
+    lines.append("\n<b>Top categories by GMV</b>")
+    for c in data["top_categories"]:
+        share = (c["gmv"] / total_gmv * 100) if total_gmv else 0
+        lines.append(f"  {c['main_cat']}: HKD {c['gmv']:,.0f} ({share:.0f}%, GP {c['gp_pct']*100:.0f}%)")
+
+    # WoW movers
+    if data["has_last_week"] and data["movers"]:
+        lines.append("\n<b>Biggest movers vs last week</b>")
+        for m in data["movers"]:
+            icon = "📈" if m["diff_abs"] >= 0 else "📉"
+            sign = "+" if m["diff_pct"] >= 0 else ""
+            lines.append(f"  {icon} {m['main_cat']}: HKD {m['gmv']:,.0f} ({sign}{m['diff_pct']:.0f}% vs HKD {m['lw_gmv']:,.0f})")
+    elif not data["has_last_week"]:
+        lines.append("\n<i>(Week-over-week comparison available once 7+ days of data accumulate)</i>")
+
+    # Low / negative margin flags
+    if data["low_margin"]:
+        lines.append("\n⚠️ <b>Low / negative GP margin flags</b>")
+        for c in data["low_margin"]:
+            lines.append(f"  {c['leaf_cat']} ({c['main_cat']}): HKD {c['gmv']:,.0f} @ GP {c['gp_pct']*100:.1f}%")
+
+    return "\n".join(lines)
+
+
 def format_daily_dashboard_summary(row: dict, report_date: str) -> str:
     def hkd(v) -> str:
         if v is None:

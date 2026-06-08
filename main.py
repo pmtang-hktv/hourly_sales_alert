@@ -15,13 +15,16 @@ from apscheduler.triggers.cron import CronTrigger
 
 from src.analyzer import build_fullday_summary, build_halfday_summary, check_anomalies
 from src.bot_listener import start_bot_listener
+from src.category_analyzer import build_category_summary
+from src.category_parser import parse_category_file
+from src.config import CATEGORY_DIR
 from src.daily_fetcher import fetch_daily_dashboard_email
 from src.daily_parser import parse_daily_dashboard
-from src.db import alert_sent, get_daily_dashboard, get_day_totals_upto_hour, get_hour_row, init_db, log_alert, upsert_daily, upsert_daily_dashboard, upsert_hourly
+from src.db import alert_sent, get_daily_dashboard, get_day_totals_upto_hour, get_hour_row, init_db, log_alert, upsert_category_rows, upsert_daily, upsert_daily_dashboard, upsert_hourly
 from src.fetcher import fetch_latest_email
 from src.notifier import send_telegram
 from src.parser import parse_email
-from src.reporter import format_anomaly_alert, format_daily_dashboard_summary, format_fullday_summary, format_halfday_summary
+from src.reporter import format_anomaly_alert, format_category_summary, format_daily_dashboard_summary, format_fullday_summary, format_halfday_summary
 
 logging.basicConfig(
     level=logging.INFO,
@@ -127,14 +130,58 @@ def run_daily_dashboard_job():
         log.info("Sent daily dashboard summary for %s", report_date)
 
 
+def _latest_category_file() -> str | None:
+    """Return the most recently modified .xlsx in CATEGORY_DIR, if any."""
+    import glob
+    import os
+    os.makedirs(CATEGORY_DIR, exist_ok=True)
+    files = glob.glob(os.path.join(CATEGORY_DIR, "*.xlsx"))
+    if not files:
+        return None
+    return max(files, key=os.path.getmtime)
+
+
+def run_category_job():
+    log.info("Category performance job started")
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    key = f"category_{yesterday}"
+    if alert_sent(key):
+        log.info("Category summary already sent for %s", yesterday)
+        return
+
+    path = _latest_category_file()
+    if not path:
+        log.warning("No category file found in %s", CATEGORY_DIR)
+        return
+
+    try:
+        rows = parse_category_file(path)
+    except Exception as exc:
+        log.error("Failed to parse category file %s: %s", path, exc)
+        return
+
+    if not rows:
+        log.warning("Category file %s produced no rows", path)
+        return
+
+    upsert_category_rows(yesterday, rows)
+    data = build_category_summary(yesterday)
+    msg = format_category_summary(data)
+    if send_telegram(msg):
+        log_alert(key, msg)
+        log.info("Sent category summary for %s (%d rows)", yesterday, len(rows))
+
+
 if __name__ == "__main__":
     init_db()
     start_bot_listener()
     scheduler = BlockingScheduler(timezone="Asia/Hong_Kong")
     scheduler.add_job(run_hourly_job, CronTrigger(minute=10), id="hourly_job")
     scheduler.add_job(run_daily_dashboard_job, CronTrigger(hour=8, minute=15), id="daily_dashboard_job")
+    scheduler.add_job(run_category_job, CronTrigger(hour=9, minute=0), id="category_job")
     log.info("Scheduler started — running at :10 past every hour (HKT)")
     log.info("Daily dashboard job scheduled at 08:15 HKT")
+    log.info("Category performance job scheduled at 09:00 HKT")
     log.info("Telegram bot listener running — send any question to your bot")
     try:
         scheduler.start()
