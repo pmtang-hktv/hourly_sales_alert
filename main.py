@@ -21,6 +21,7 @@ from src.bot_listener import start_bot_listener
 from src.category_analyzer import build_category_summary
 from src.category_parser import parse_category_file
 from src.config import CATEGORY_DIR
+from src.tableau_downloader import download_category_performance
 from src.daily_fetcher import fetch_daily_dashboard_email
 from src.daily_parser import parse_daily_dashboard
 from src.db import alert_sent, get_daily_dashboard, get_day_totals_upto_hour, get_hour_row, init_db, log_alert, upsert_category_rows, upsert_daily, upsert_daily_dashboard, upsert_hourly
@@ -151,6 +152,13 @@ def run_category_job():
     if alert_sent(key):
         log.info("Category summary already sent for %s", yesterday)
         return
+
+    # Auto-download from Tableau (falls back to manual file if credentials not set)
+    downloaded = download_category_performance()
+    if downloaded:
+        log.info("Auto-downloaded category file: %s", downloaded)
+    else:
+        log.info("Auto-download skipped or failed — checking for manually placed file")
 
     path = _latest_category_file()
     if not path:

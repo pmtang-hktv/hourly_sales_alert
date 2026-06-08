@@ -21,3 +21,9 @@ CATEGORY_DIR = os.getenv("CATEGORY_DIR", "data/category")
 ANOMALY_Z_THRESHOLD = float(os.getenv("ANOMALY_Z_THRESHOLD", "2.0"))
 MIN_GATEWAY_VOLUME = int(os.getenv("MIN_GATEWAY_VOLUME", "20"))
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
+
+# Tableau Server automation
+TABLEAU_SERVER = os.getenv("TABLEAU_SERVER", "https://inhouse-analytics.hktv.com.hk")
+TABLEAU_USERNAME = os.getenv("TABLEAU_USERNAME", "")
+TABLEAU_PASSWORD = os.getenv("TABLEAU_PASSWORD", "")
+TABLEAU_ACCESS_KEY = os.getenv("TABLEAU_ACCESS_KEY", "")
