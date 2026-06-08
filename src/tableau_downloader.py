@@ -148,6 +148,21 @@ def _debug_dump(driver: webdriver.Chrome, label: str):
                  inp.get_attribute("type"), inp.get_attribute("id"),
                  inp.get_attribute("class"), inp.get_attribute("value"))
 
+    # Log clickable elements whose text looks like a date (for calendar picker diagnosis)
+    _DATE_TEXT_RE = re.compile(r"\d{4}/\d{1,2}/\d{1,2}")
+    candidates = driver.find_elements(By.XPATH, "//*[not(self::script)][not(self::style)]")
+    date_els = []
+    for el in candidates:
+        try:
+            txt = (el.get_attribute("textContent") or "").strip()
+            if _DATE_TEXT_RE.fullmatch(txt):
+                date_els.append((el.tag_name, el.get_attribute("class") or "", txt))
+        except Exception:
+            pass
+    log.info("Date-text elements in frame (%s): %d", label, len(date_els))
+    for tag, cls, txt in date_els[:20]:
+        log.info("  <%s class=%r> %s", tag, cls, txt)
+
 
 def _find_access_key_input(driver: webdriver.Chrome) -> webdriver.remote.webelement.WebElement | None:
     """Search current frame (and one level of nested iframes) for the Access Key text input."""
@@ -426,6 +441,8 @@ def backfill_category_performance(dates: list) -> dict:
             _switch_to_viz_frame(driver)
             _enter_access_key(driver)
             _click_category_tab(driver)
+            if not TABLEAU_HEADLESS:
+                _debug_dump(driver, f"cat_date_els_{iso}")
 
             # Now set the date via URL navigation, keeping the session cookie intact
             cat_url = (
