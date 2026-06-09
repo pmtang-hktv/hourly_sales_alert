@@ -34,7 +34,7 @@ from src.config import CATEGORY_DIR, DAILY_DIR, TABLEAU_ACCESS_KEY, TABLEAU_HEAD
 log = logging.getLogger(__name__)
 
 _WAIT = 30
-_DOWNLOAD_TIMEOUT = 120
+_DOWNLOAD_TIMEOUT = 300
 _WORKBOOK = "RMDashboard-GPReport"
 _GP_OVERVIEW = "GPOverview"
 _DAILY_WORKBOOK = "DailySalesUpdate-BQSimplfied"
@@ -537,6 +537,7 @@ def _download_pdf(driver: webdriver.Chrome):
 def _wait_for_pdf(since: float, date_str: str) -> str | None:
     """Wait for a new PDF to finish downloading into DAILY_DIR, then rename it."""
     deadline = time.time() + _DOWNLOAD_TIMEOUT
+    last_log = time.time()
     while time.time() < deadline:
         partial = [f for f in os.listdir(DAILY_DIR) if f.endswith(".crdownload")]
         candidates = [
@@ -545,6 +546,9 @@ def _wait_for_pdf(since: float, date_str: str) -> str | None:
             if f.endswith(".pdf") and not f.startswith(".")
         ]
         recent = [p for p in candidates if os.path.getmtime(p) >= since - 2]
+        if time.time() - last_log >= 15:
+            log.info("Waiting for PDF... partial=%s recent_pdfs=%s", partial, [os.path.basename(p) for p in recent])
+            last_log = time.time()
         if recent and not partial:
             newest = max(recent, key=os.path.getmtime)
             size1 = os.path.getsize(newest)
