@@ -535,9 +535,13 @@ def download_daily_sales_update() -> str | None:
                 "personalAccessTokenSecret": TABLEAU_PAT_SECRET,
                 "site": {"contentUrl": ""},
             }},
+            headers={"content-type": "application/json", "accept": "application/json"},
             timeout=30,
+            verify=False,
         )
-        resp.raise_for_status()
+        if not resp.ok:
+            log.error("Sign-in failed: %s %s", resp.status_code, resp.text[:500])
+            return None
         creds = resp.json()["credentials"]
         token = creds["token"]
         site_id = creds["site"]["id"]
@@ -550,6 +554,7 @@ def download_daily_sales_update() -> str | None:
             headers=headers,
             params={"filter": f"viewUrlName:eq:{_DAILY_SHEET}"},
             timeout=30,
+            verify=False,
         )
         resp.raise_for_status()
         views = resp.json().get("views", {}).get("view", [])
@@ -566,6 +571,7 @@ def download_daily_sales_update() -> str | None:
             params={"type": "A4", "orientation": "Landscape"},
             timeout=120,
             stream=True,
+            verify=False,
         )
         resp.raise_for_status()
 
@@ -577,7 +583,7 @@ def download_daily_sales_update() -> str | None:
         log.info("Downloaded PDF via REST API: %s (%d bytes)", path, size)
 
         # 4. Sign out
-        requests.post(f"{base}/auth/signout", headers=headers, timeout=10)
+        requests.post(f"{base}/auth/signout", headers=headers, timeout=10, verify=False)
 
         return path
 
