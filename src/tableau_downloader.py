@@ -325,7 +325,7 @@ def _click_download_button(driver: webdriver.Chrome):
         (By.XPATH, "//button[contains(@aria-label,'下載') or contains(@title,'下載')]"),
         (By.CSS_SELECTOR, ".tab-toolbar-btn-download"),
     ]
-    deadline = time.time() + 45
+    deadline = time.time() + 180
     while time.time() < deadline:
         for by, sel in _SELECTORS:
             try:
