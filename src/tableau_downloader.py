@@ -511,29 +511,52 @@ def backfill_category_performance(dates: list) -> dict:
 
 # ── Daily Sales Update ────────────────────────────────────────────────────────
 
-def _js_click(driver: webdriver.Chrome, element) -> None:
-    """Click via JavaScript to bypass overlay interception."""
-    driver.execute_script("arguments[0].click();", element)
-
-
 def _download_pdf(driver: webdriver.Chrome):
-    """Click Download > PDF > 下載 in the viz iframe toolbar."""
-    _click_download_button(driver)
+    """Click Download > PDF > 下載. Each selector gets up to 30 s to become clickable."""
+    wait = WebDriverWait(driver, _WAIT)
 
-    pdf_btn = WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.XPATH,
-        "//*[@data-tb-test-id='DownloadPdf-Button' or normalize-space()='PDF']"
-    )))
-    _js_click(driver, pdf_btn)
-    log.info("Clicked PDF option")
+    for by, sel in [
+        (By.CSS_SELECTOR, "[data-tb-test-id='DownloadButton-Button']"),
+        (By.CSS_SELECTOR, "button[title='Download']"),
+        (By.CSS_SELECTOR, "button[aria-label='Download']"),
+        (By.XPATH, "//button[contains(@aria-label,'下載') or contains(@title,'下載')]"),
+        (By.CSS_SELECTOR, "[data-tb-test-id*='ownload']"),
+        (By.CSS_SELECTOR, "[data-tb-test-id='viz-viewer-toolbar-button-download']"),
+    ]:
+        try:
+            wait.until(EC.element_to_be_clickable((by, sel))).click()
+            log.info("Clicked Download button via: %s", sel)
+            break
+        except TimeoutException:
+            continue
+    else:
+        raise RuntimeError("Could not find Download button")
+    time.sleep(1)
+
+    for by, sel in [
+        (By.CSS_SELECTOR, "[data-tb-test-id='DownloadPdf-Button']"),
+        (By.XPATH, "//*[normalize-space()='PDF']"),
+    ]:
+        try:
+            wait.until(EC.element_to_be_clickable((by, sel))).click()
+            log.info("Clicked PDF option")
+            break
+        except TimeoutException:
+            continue
     time.sleep(1.5)
 
-    dl_btn = WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.XPATH,
-        "//*[@data-tb-test-id='export-pdf-export-Button' or "
-        "(local-name()='button' and "
-        "(normalize-space()='下載' or normalize-space()='Download'))]"
-    )))
-    _js_click(driver, dl_btn)
-    log.info("Clicked 下載 in PDF dialog")
+    for by, sel in [
+        (By.CSS_SELECTOR, "[data-tb-test-id='export-pdf-export-Button']"),
+        (By.XPATH, "//button[normalize-space()='下載']"),
+        (By.XPATH, "//button[normalize-space()='Download']"),
+    ]:
+        try:
+            wait.until(EC.element_to_be_clickable((by, sel))).click()
+            log.info("Clicked 下載 in PDF dialog")
+            return
+        except TimeoutException:
+            continue
+    raise RuntimeError("Could not click 下載 in PDF dialog")
 
 
 def _wait_for_pdf(since: float, date_str: str) -> str | None:
@@ -609,8 +632,6 @@ def download_daily_sales_update() -> str | None:
         file_date = _parse_daily_data_date(driver) or file_date
         log.info("Data date: %s", file_date)
 
-        # Download button lives inside the viz iframe, not the outer page chrome.
-        _switch_to_viz_frame(driver)
         _download_pdf(driver)
 
         path = _wait_for_pdf(since=start, date_str=file_date)
