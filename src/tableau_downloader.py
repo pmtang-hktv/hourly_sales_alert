@@ -551,21 +551,37 @@ def download_daily_sales_update() -> str | None:
         headers = {"x-tableau-auth": token, "accept": "application/json"}
         log.info("Signed in to Tableau REST API (site_id=%s)", site_id)
 
-        # 2. Find the view by URL name
+        # 2. Find the workbook by its content URL, then get the exact view from it
         resp = requests.get(
-            f"{base}/sites/{site_id}/views",
+            f"{base}/sites/{site_id}/workbooks",
             headers=headers,
-            params={"filter": f"viewUrlName:eq:{_DAILY_SHEET}"},
+            params={"filter": f"contentUrl:eq:{_DAILY_WORKBOOK}"},
+            timeout=30,
+            verify=False,
+        )
+        resp.raise_for_status()
+        workbooks = resp.json().get("workbooks", {}).get("workbook", [])
+        if not workbooks:
+            log.error("No workbook found with contentUrl=%s", _DAILY_WORKBOOK)
+            return None
+        workbook_id = workbooks[0]["id"]
+        log.info("Found workbook: id=%s name=%s", workbook_id, workbooks[0].get("name"))
+
+        resp = requests.get(
+            f"{base}/sites/{site_id}/workbooks/{workbook_id}/views",
+            headers=headers,
             timeout=30,
             verify=False,
         )
         resp.raise_for_status()
         views = resp.json().get("views", {}).get("view", [])
-        if not views:
-            log.error("No view found with urlName=%s", _DAILY_SHEET)
+        view = next((v for v in views if v.get("viewUrlName") == _DAILY_SHEET), None)
+        if not view:
+            log.error("No view '%s' in workbook '%s'. Available: %s",
+                      _DAILY_SHEET, _DAILY_WORKBOOK, [v.get("viewUrlName") for v in views])
             return None
-        view_id = views[0]["id"]
-        log.info("Found view: id=%s name=%s", view_id, views[0].get("name"))
+        view_id = view["id"]
+        log.info("Found view: id=%s name=%s", view_id, view.get("name"))
 
         # 3. Download PDF
         resp = requests.get(
