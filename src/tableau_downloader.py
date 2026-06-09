@@ -77,35 +77,28 @@ def _wait_for_tableau(driver: webdriver.Chrome, extra: float = 2.0):
 
 
 def _login(driver: webdriver.Chrome):
-    wait = WebDriverWait(driver, _WAIT)
     driver.get(f"{TABLEAU_SERVER}/#/signin")
 
-    for sel in ["input#username", "input[name='username']", "input[autocomplete='username']", "input[type='text']"]:
-        try:
-            f = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, sel)))
-            f.clear()
-            f.send_keys(TABLEAU_USERNAME)
-            break
-        except TimeoutException:
-            continue
+    # Combine all candidate selectors into one CSS query — finds whichever exists
+    # without waiting for each to time out individually.
+    f = WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.CSS_SELECTOR,
+        "input#username, input[name='username'], input[autocomplete='username'], input[type='text']"
+    )))
+    f.clear()
+    f.send_keys(TABLEAU_USERNAME)
 
-    for sel in ["input#password", "input[name='password']", "input[type='password']"]:
-        try:
-            f = driver.find_element(By.CSS_SELECTOR, sel)
-            f.clear()
-            f.send_keys(TABLEAU_PASSWORD)
-            break
-        except Exception:
-            continue
+    p = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR,
+        "input#password, input[name='password'], input[type='password']"
+    )))
+    p.clear()
+    p.send_keys(TABLEAU_PASSWORD)
 
-    for sel in ["button[type='submit']", "button.signin-btn", "#signin-btn", "input[type='submit']"]:
-        try:
-            driver.find_element(By.CSS_SELECTOR, sel).click()
-            break
-        except Exception:
-            continue
+    btn = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR,
+        "button[type='submit'], button.signin-btn, #signin-btn, input[type='submit']"
+    )))
+    btn.click()
 
-    wait.until(lambda d: "signin" not in d.current_url.lower())
+    WebDriverWait(driver, 15).until(lambda d: "signin" not in d.current_url.lower())
     log.info("Logged in to Tableau Server")
 
 

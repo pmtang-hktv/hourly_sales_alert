@@ -94,24 +94,18 @@ def screenshot(label):
 # ── 1. Login ──────────────────────────────────────────────────────────────────
 log.info("Logging in...")
 driver.get(f"{TABLEAU_SERVER}/#/signin")
-for sel in ["input#username", "input[name='username']", "input[type='text']"]:
-    try:
-        f = wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, sel)))
-        f.clear(); f.send_keys(TABLEAU_USERNAME); break
-    except TimeoutException:
-        continue
-for sel in ["input#password", "input[type='password']"]:
-    try:
-        f = driver.find_element(By.CSS_SELECTOR, sel)
-        f.clear(); f.send_keys(TABLEAU_PASSWORD); break
-    except Exception:
-        continue
-for sel in ["button[type='submit']", "button.signin-btn", "#signin-btn"]:
-    try:
-        driver.find_element(By.CSS_SELECTOR, sel).click(); break
-    except Exception:
-        continue
-wait.until(lambda d: "signin" not in d.current_url.lower())
+f = WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.CSS_SELECTOR,
+    "input#username, input[name='username'], input[autocomplete='username'], input[type='text']"
+)))
+f.clear(); f.send_keys(TABLEAU_USERNAME)
+p = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.CSS_SELECTOR,
+    "input#password, input[name='password'], input[type='password']"
+)))
+p.clear(); p.send_keys(TABLEAU_PASSWORD)
+WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR,
+    "button[type='submit'], button.signin-btn, #signin-btn, input[type='submit']"
+))).click()
+WebDriverWait(driver, 15).until(lambda d: "signin" not in d.current_url.lower())
 log.info("Logged in")
 
 # ── 2. Open the Daily Sales Update view ───────────────────────────────────────
