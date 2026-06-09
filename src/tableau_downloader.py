@@ -307,61 +307,35 @@ def _click_category_tab(driver: webdriver.Chrome):
     raise RuntimeError("Could not find the Category Performance tab")
 
 
+def _click_download_button(driver: webdriver.Chrome):
+    """Click the Tableau Download toolbar button (works in both main frame and viz frame)."""
+    btn = WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.CSS_SELECTOR,
+        "[data-tb-test-id='DownloadButton-Button'], "
+        "button[title='Download'], button[aria-label='Download'], "
+        "button[title='下載'], button[aria-label='下載'], "
+        ".tab-toolbar-btn-download, [data-tb-test-id*='ownload']"
+    )))
+    btn.click()
+    log.info("Clicked Download button")
+    time.sleep(0.8)
+
+
 def _download_crosstab(driver: webdriver.Chrome):
-    wait = WebDriverWait(driver, _WAIT)
+    _click_download_button(driver)
 
-    # 1. Click the Download toolbar button
-    dl_btn = None
-    for by, sel in [
-        (By.CSS_SELECTOR, "[data-tb-test-id='DownloadButton-Button']"),
-        (By.CSS_SELECTOR, "button[title='Download']"),
-        (By.CSS_SELECTOR, "button[aria-label='Download']"),
-        (By.XPATH, "//button[contains(@aria-label,'下載') or contains(@title,'下載')]"),
-        (By.CSS_SELECTOR, ".tab-toolbar-btn-download"),
-        (By.CSS_SELECTOR, "[data-tb-test-id*='ownload']"),
-    ]:
-        try:
-            dl_btn = wait.until(EC.element_to_be_clickable((by, sel)))
-            log.info("Found Download button via: %s", sel)
-            break
-        except TimeoutException:
-            continue
-    if dl_btn is None:
-        raise RuntimeError("Could not find Download button in Tableau toolbar")
-    dl_btn.click()
-    time.sleep(1)
-
-    # 2. Click 交叉資料表 (Crosstab) in the dropdown
-    for by, sel in [
-        (By.CSS_SELECTOR, "[data-tb-test-id='DownloadCrosstab-Button']"),
-        (By.XPATH, "//*[normalize-space()='交叉資料表']"),
-        (By.XPATH, "//*[normalize-space()='Crosstab']"),
-        (By.XPATH, "//*[contains(text(),'交叉資料表')]"),
-    ]:
-        try:
-            el = wait.until(EC.element_to_be_clickable((by, sel)))
-            el.click()
-            log.info("Clicked Crosstab (交叉資料表)")
-            break
-        except TimeoutException:
-            continue
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH,
+        "//*[@data-tb-test-id='DownloadCrosstab-Button' or "
+        "normalize-space()='交叉資料表' or normalize-space()='Crosstab']"
+    ))).click()
+    log.info("Clicked Crosstab")
     time.sleep(1.5)
 
-    # 3. Excel is the default format — click 下載
-    for by, sel in [
-        (By.CSS_SELECTOR, "[data-tb-test-id='export-crosstab-export-Button']"),
-        (By.XPATH, "//button[normalize-space()='下載']"),
-        (By.XPATH, "//button[normalize-space()='Download']"),
-        (By.XPATH, "//*[@role='button' and (normalize-space()='下載' or normalize-space()='Download')]"),
-    ]:
-        try:
-            btn = wait.until(EC.element_to_be_clickable((by, sel)))
-            btn.click()
-            log.info("Clicked 下載 in crosstab dialog")
-            return
-        except TimeoutException:
-            continue
-    raise RuntimeError("Could not find the 下載/Download button in the crosstab dialog")
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH,
+        "//*[@data-tb-test-id='export-crosstab-export-Button' or "
+        "(local-name()='button' and "
+        "(normalize-space()='下載' or normalize-space()='Download'))]"
+    ))).click()
+    log.info("Clicked 下載 in crosstab dialog")
 
 
 def _wait_for_download(since: float, date_str: str) -> str | None:
@@ -498,52 +472,21 @@ def backfill_category_performance(dates: list) -> dict:
 # ── Daily Sales Update ────────────────────────────────────────────────────────
 
 def _download_pdf(driver: webdriver.Chrome):
-    """Click Download > PDF > 下載 in the current Tableau view."""
-    wait = WebDriverWait(driver, _WAIT)
+    """Click Download > PDF > 下載 in the Tableau Server toolbar (main frame)."""
+    _click_download_button(driver)
 
-    dl_btn = None
-    for by, sel in [
-        (By.CSS_SELECTOR, "[data-tb-test-id='DownloadButton-Button']"),
-        (By.CSS_SELECTOR, "button[title='Download']"),
-        (By.CSS_SELECTOR, "button[aria-label='Download']"),
-        (By.XPATH, "//button[contains(@aria-label,'下載') or contains(@title,'下載')]"),
-        (By.CSS_SELECTOR, "[data-tb-test-id*='ownload']"),
-    ]:
-        try:
-            dl_btn = wait.until(EC.element_to_be_clickable((by, sel)))
-            log.info("Found Download button via: %s", sel)
-            break
-        except TimeoutException:
-            continue
-    if dl_btn is None:
-        raise RuntimeError("Could not find Download button")
-    dl_btn.click()
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH,
+        "//*[@data-tb-test-id='DownloadPdf-Button' or normalize-space()='PDF']"
+    ))).click()
+    log.info("Clicked PDF option")
     time.sleep(1)
 
-    for by, sel in [
-        (By.CSS_SELECTOR, "[data-tb-test-id='DownloadPdf-Button']"),
-        (By.XPATH, "//*[normalize-space()='PDF']"),
-    ]:
-        try:
-            wait.until(EC.element_to_be_clickable((by, sel))).click()
-            log.info("Clicked PDF option")
-            break
-        except TimeoutException:
-            continue
-    time.sleep(1.5)
-
-    for by, sel in [
-        (By.CSS_SELECTOR, "[data-tb-test-id='export-pdf-export-Button']"),
-        (By.XPATH, "//button[normalize-space()='下載']"),
-        (By.XPATH, "//button[normalize-space()='Download']"),
-    ]:
-        try:
-            wait.until(EC.element_to_be_clickable((by, sel))).click()
-            log.info("Clicked 下載 in PDF dialog")
-            return
-        except TimeoutException:
-            continue
-    raise RuntimeError("Could not click 下載 in PDF dialog")
+    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH,
+        "//*[@data-tb-test-id='export-pdf-export-Button' or "
+        "(local-name()='button' and "
+        "(normalize-space()='下載' or normalize-space()='Download'))]"
+    ))).click()
+    log.info("Clicked 下載 in PDF dialog")
 
 
 def _wait_for_pdf(since: float, date_str: str) -> str | None:
