@@ -1,11 +1,14 @@
-"""Automated download of Category Performance crosstab from Tableau Server.
+"""Automated downloads from Tableau Server.
 
-Flow (matches the manual steps):
-  1. Log in to Tableau Server
-  2. On GP Overview: enter the Access Key, set the date range (from=to=target date)
-  3. Click the "Category Performance" tab (date carries over as a workbook parameter)
-  4. Download > Crosstab (交叉資料表) > Excel > 下載
-  5. Wait for the xlsx, rename it to category_performance_YYYY-MM-DD.xlsx
+Category Performance (GP Report):
+  1. Log in, open GP Overview, enter Access Key, set date range
+  2. Switch to Category Performance tab → Download > Crosstab > Excel
+  3. Rename to category_performance_YYYY-MM-DD.xlsx
+
+Daily Sales Update:
+  1. Log in, open DailySalesUpdate view (auto-shows yesterday)
+  2. Download > PDF
+  3. Rename to daily_sales_YYYY-MM-DD.pdf
 """
 from __future__ import annotations
 
@@ -26,7 +29,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
-from src.config import CATEGORY_DIR, TABLEAU_ACCESS_KEY, TABLEAU_HEADLESS, TABLEAU_PASSWORD, TABLEAU_SERVER, TABLEAU_USERNAME
+from src.config import CATEGORY_DIR, DAILY_DIR, TABLEAU_ACCESS_KEY, TABLEAU_HEADLESS, TABLEAU_PASSWORD, TABLEAU_SERVER, TABLEAU_USERNAME
 
 log = logging.getLogger(__name__)
 
@@ -34,13 +37,15 @@ _WAIT = 30
 _DOWNLOAD_TIMEOUT = 120
 _WORKBOOK = "RMDashboard-GPReport"
 _GP_OVERVIEW = "GPOverview"
+_DAILY_WORKBOOK = "DailySalesUpdate-BQSimplfied"
+_DAILY_SHEET = "DailySalesUpdate"
 
 # GP Overview date fields use yyyy/m/d (not zero-padded)
 _DATE_YMD_RE = re.compile(r"^\d{4}/\d+/\d+$")
 
 
-def _make_driver() -> webdriver.Chrome:
-    abs_dir = str(Path(CATEGORY_DIR).resolve())
+def _make_driver(download_dir: str | None = None) -> webdriver.Chrome:
+    abs_dir = str(Path(download_dir or CATEGORY_DIR).resolve())
     opts = Options()
     # Return from driver.get() on DOMContentLoaded — Tableau keeps loading long after the page is usable
     opts.page_load_strategy = "eager"
@@ -485,6 +490,116 @@ def backfill_category_performance(dates: list) -> dict:
     except Exception as exc:
         log.error("Backfill session failed: %s", exc, exc_info=True)
         return results
+    finally:
+        if driver:
+            driver.quit()
+
+
+# ── Daily Sales Update ────────────────────────────────────────────────────────
+
+def _download_pdf(driver: webdriver.Chrome):
+    """Click Download > PDF > 下載 in the current Tableau view."""
+    wait = WebDriverWait(driver, _WAIT)
+
+    dl_btn = None
+    for by, sel in [
+        (By.CSS_SELECTOR, "[data-tb-test-id='DownloadButton-Button']"),
+        (By.CSS_SELECTOR, "button[title='Download']"),
+        (By.CSS_SELECTOR, "button[aria-label='Download']"),
+        (By.XPATH, "//button[contains(@aria-label,'下載') or contains(@title,'下載')]"),
+        (By.CSS_SELECTOR, "[data-tb-test-id*='ownload']"),
+    ]:
+        try:
+            dl_btn = wait.until(EC.element_to_be_clickable((by, sel)))
+            log.info("Found Download button via: %s", sel)
+            break
+        except TimeoutException:
+            continue
+    if dl_btn is None:
+        raise RuntimeError("Could not find Download button")
+    dl_btn.click()
+    time.sleep(1)
+
+    for by, sel in [
+        (By.CSS_SELECTOR, "[data-tb-test-id='DownloadPdf-Button']"),
+        (By.XPATH, "//*[normalize-space()='PDF']"),
+    ]:
+        try:
+            wait.until(EC.element_to_be_clickable((by, sel))).click()
+            log.info("Clicked PDF option")
+            break
+        except TimeoutException:
+            continue
+    time.sleep(1.5)
+
+    for by, sel in [
+        (By.CSS_SELECTOR, "[data-tb-test-id='export-pdf-export-Button']"),
+        (By.XPATH, "//button[normalize-space()='下載']"),
+        (By.XPATH, "//button[normalize-space()='Download']"),
+    ]:
+        try:
+            wait.until(EC.element_to_be_clickable((by, sel))).click()
+            log.info("Clicked 下載 in PDF dialog")
+            return
+        except TimeoutException:
+            continue
+    raise RuntimeError("Could not click 下載 in PDF dialog")
+
+
+def _wait_for_pdf(since: float, date_str: str) -> str | None:
+    """Wait for a new PDF to finish downloading into DAILY_DIR, then rename it."""
+    deadline = time.time() + _DOWNLOAD_TIMEOUT
+    while time.time() < deadline:
+        partial = [f for f in os.listdir(DAILY_DIR) if f.endswith(".crdownload")]
+        candidates = [
+            os.path.join(DAILY_DIR, f)
+            for f in os.listdir(DAILY_DIR)
+            if f.endswith(".pdf") and not f.startswith(".")
+        ]
+        recent = [p for p in candidates if os.path.getmtime(p) >= since - 2]
+        if recent and not partial:
+            newest = max(recent, key=os.path.getmtime)
+            size1 = os.path.getsize(newest)
+            time.sleep(2)
+            size2 = os.path.getsize(newest)
+            if size1 == size2 > 0:
+                target = os.path.join(DAILY_DIR, f"daily_sales_{date_str}.pdf")
+                os.replace(newest, target)
+                log.info("Downloaded PDF: %s (%d bytes)", target, size2)
+                return target
+        time.sleep(2)
+    return None
+
+
+def download_daily_sales_update() -> str | None:
+    """Download the Daily Sales Update PDF from Tableau for yesterday. Returns path or None."""
+    if not all([TABLEAU_SERVER, TABLEAU_USERNAME, TABLEAU_PASSWORD]):
+        log.warning("Tableau credentials not configured — skipping download")
+        return None
+
+    os.makedirs(DAILY_DIR, exist_ok=True)
+    d = (datetime.now() - timedelta(days=1)).date()
+    file_date = d.strftime("%Y-%m-%d")
+    start = time.time()
+    driver = None
+    try:
+        view_url = f"{TABLEAU_SERVER}/views/{_DAILY_WORKBOOK}/{_DAILY_SHEET}"
+        driver = _make_driver(download_dir=DAILY_DIR)
+        _login(driver, target_url=view_url)
+        _wait_for_tableau(driver, extra=2)
+        log.info("Loaded Daily Sales Update view")
+
+        _switch_to_viz_frame(driver)
+        _download_pdf(driver)
+
+        path = _wait_for_pdf(since=start, date_str=file_date)
+        if not path:
+            log.error("PDF download timed out after %ds", _DOWNLOAD_TIMEOUT)
+        return path
+
+    except Exception as exc:
+        log.error("Daily Sales Update download failed: %s", exc, exc_info=True)
+        return None
     finally:
         if driver:
             driver.quit()

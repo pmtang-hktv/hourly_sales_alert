@@ -5,8 +5,8 @@ Schedule:
   :10 past every hour  — fetch latest email, store data, check for anomalies
   12:10                — also send half-day summary (00:00–12:00)
   00:10                — also send full-day summary for previous day
-  08:15                — fetch daily dashboard email, extract via Vision, send summary
   15:00                — parse latest category performance xlsx, send summary
+  15:30                — download Daily Sales Update PDF from Tableau, parse, send summary
 """
 from __future__ import annotations
 
@@ -21,8 +21,7 @@ from src.bot_listener import start_bot_listener
 from src.category_analyzer import build_category_summary
 from src.category_parser import parse_category_file
 from src.config import CATEGORY_DIR
-from src.tableau_downloader import download_category_performance
-from src.daily_fetcher import fetch_daily_dashboard_email
+from src.tableau_downloader import download_category_performance, download_daily_sales_update
 from src.daily_parser import parse_daily_dashboard
 from src.db import alert_sent, get_daily_dashboard, get_day_totals_upto_hour, get_hour_row, init_db, log_alert, upsert_category_rows, upsert_daily, upsert_daily_dashboard, upsert_hourly
 from src.fetcher import fetch_latest_email
@@ -108,30 +107,31 @@ def _send_fullday_summary(report_date: str, summary: dict):
 
 def run_daily_dashboard_job():
     log.info("Daily dashboard job started")
-    # The 8:15am email always covers yesterday
     yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
     key = f"daily_dashboard_{yesterday}"
     if alert_sent(key):
         log.info("Daily dashboard already sent for %s", yesterday)
         return
 
-    raw = fetch_daily_dashboard_email()
-    if not raw:
-        log.warning("No daily dashboard email found")
+    path = download_daily_sales_update()
+    if not path:
+        log.warning("Failed to download Daily Sales Update PDF from Tableau")
         return
 
-    parsed = parse_daily_dashboard(raw["image_bytes"])
+    with open(path, "rb") as f:
+        pdf_bytes = f.read()
+
+    parsed = parse_daily_dashboard(pdf_bytes)
     if not parsed:
-        log.warning("Failed to parse daily dashboard image")
+        log.warning("Failed to parse Daily Sales Update PDF")
         return
 
     import json
-    report_date = yesterday  # always use yesterday — Vision date parsing is unreliable for HK format
-    upsert_daily_dashboard(report_date, parsed, json.dumps(parsed))
-    msg = format_daily_dashboard_summary(get_daily_dashboard(report_date), report_date)
+    upsert_daily_dashboard(yesterday, parsed, json.dumps(parsed))
+    msg = format_daily_dashboard_summary(get_daily_dashboard(yesterday), yesterday)
     if send_telegram(msg):
         log_alert(key, msg)
-        log.info("Sent daily dashboard summary for %s", report_date)
+        log.info("Sent daily dashboard summary for %s", yesterday)
 
 
 def _latest_category_file() -> str | None:
@@ -188,11 +188,11 @@ if __name__ == "__main__":
     start_bot_listener()
     scheduler = BlockingScheduler(timezone="Asia/Hong_Kong")
     scheduler.add_job(run_hourly_job, CronTrigger(minute=10), id="hourly_job")
-    scheduler.add_job(run_daily_dashboard_job, CronTrigger(hour=8, minute=15), id="daily_dashboard_job")
     scheduler.add_job(run_category_job, CronTrigger(hour=15, minute=0), id="category_job")
+    scheduler.add_job(run_daily_dashboard_job, CronTrigger(hour=15, minute=30), id="daily_dashboard_job")
     log.info("Scheduler started — running at :10 past every hour (HKT)")
-    log.info("Daily dashboard job scheduled at 08:15 HKT")
     log.info("Category performance job scheduled at 15:00 HKT")
+    log.info("Daily dashboard job scheduled at 15:30 HKT (Tableau PDF)")
     log.info("Telegram bot listener running — send any question to your bot")
     try:
         scheduler.start()

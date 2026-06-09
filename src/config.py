@@ -18,6 +18,8 @@ TELEGRAM_ALL_CHAT_IDS: list = ([TELEGRAM_CHAT_ID] if TELEGRAM_CHAT_ID else []) +
 DB_PATH = os.getenv("DB_PATH", "data/sales.db")
 # Folder where the daily Tableau Category Performance xlsx is dropped/downloaded
 CATEGORY_DIR = os.getenv("CATEGORY_DIR", "data/category")
+# Folder where the daily Tableau Daily Sales Update PDF is downloaded
+DAILY_DIR = os.getenv("DAILY_DIR", "data/daily")
 ANOMALY_Z_THRESHOLD = float(os.getenv("ANOMALY_Z_THRESHOLD", "2.0"))
 MIN_GATEWAY_VOLUME = int(os.getenv("MIN_GATEWAY_VOLUME", "20"))
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
