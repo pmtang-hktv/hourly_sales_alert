@@ -336,6 +336,23 @@ def _click_download_button(driver: webdriver.Chrome):
                 return
             except TimeoutException:
                 continue
+
+    # No selector matched — dump all buttons so we can identify the right one
+    if not TABLEAU_HEADLESS:
+        try:
+            driver.save_screenshot(os.path.join(DAILY_DIR, "debug_no_download_btn.png"))
+            log.info("Screenshot saved to %s/debug_no_download_btn.png", DAILY_DIR)
+        except Exception:
+            pass
+    buttons = driver.find_elements(By.TAG_NAME, "button")
+    log.warning("=== ALL BUTTONS (main frame) count=%d ===", len(buttons))
+    for i, b in enumerate(buttons):
+        try:
+            log.warning("  [%d] text=%r title=%r aria-label=%r data-tb-test-id=%r displayed=%s",
+                i, b.text[:40], b.get_attribute("title"), b.get_attribute("aria-label"),
+                b.get_attribute("data-tb-test-id"), b.is_displayed())
+        except Exception:
+            pass
     raise RuntimeError("Could not find a clickable Download button within 45 s")
 
 
