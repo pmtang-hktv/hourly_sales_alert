@@ -59,6 +59,8 @@ def _make_driver(download_dir: str | None = None) -> webdriver.Chrome:
         "download.prompt_for_download": False,
         "download.directory_upgrade": True,
         "safebrowsing.enabled": False,
+        # Force PDFs to download instead of opening in the browser viewer
+        "plugins.always_open_pdf_externally": True,
     })
     service = Service(ChromeDriverManager().install())
     return webdriver.Chrome(service=service, options=opts)
@@ -535,17 +537,23 @@ def _download_pdf(driver: webdriver.Chrome):
 
 
 def _wait_for_pdf(since: float, date_str: str) -> str | None:
-    """Wait for a new PDF to finish downloading into DAILY_DIR, then rename it."""
+    """Wait for a new PDF to finish downloading, then rename and move it to DAILY_DIR."""
+    search_dirs = [DAILY_DIR, str(Path.home() / "Downloads")]
     deadline = time.time() + _DOWNLOAD_TIMEOUT
     last_log = time.time()
     while time.time() < deadline:
-        partial = [f for f in os.listdir(DAILY_DIR) if f.endswith(".crdownload")]
-        candidates = [
-            os.path.join(DAILY_DIR, f)
-            for f in os.listdir(DAILY_DIR)
-            if f.endswith(".pdf") and not f.startswith(".")
-        ]
-        recent = [p for p in candidates if os.path.getmtime(p) >= since - 2]
+        partial: list[str] = []
+        recent: list[str] = []
+        for d in search_dirs:
+            if not os.path.isdir(d):
+                continue
+            partial += [f for f in os.listdir(d) if f.endswith(".crdownload")]
+            candidates = [
+                os.path.join(d, f)
+                for f in os.listdir(d)
+                if f.endswith(".pdf") and not f.startswith(".")
+            ]
+            recent += [p for p in candidates if os.path.getmtime(p) >= since - 2]
         if time.time() - last_log >= 15:
             log.info("Waiting for PDF... partial=%s recent_pdfs=%s", partial, [os.path.basename(p) for p in recent])
             last_log = time.time()
