@@ -435,9 +435,9 @@ def download_category_performance() -> str | None:
 def backfill_category_performance(dates: list) -> dict:
     """Download Category Performance for each date in `dates` (list of date objects).
 
-    For each date: reload GP Overview (session persists — no re-login), enter the
-    access key, set the date range on GP Overview, switch to Category Performance,
-    and download. Returns {iso_date: path_or_None}.
+    Logs in once, enters the access key once (it persists for the Tableau session),
+    then for each date reloads GP Overview, sets the date range, switches to Category
+    Performance, and downloads. Returns {iso_date: path_or_None}.
     """
     results: dict = {}
     if not all([TABLEAU_SERVER, TABLEAU_USERNAME, TABLEAU_PASSWORD, TABLEAU_ACCESS_KEY]):
@@ -449,17 +449,21 @@ def backfill_category_performance(dates: list) -> dict:
     try:
         driver = _make_driver()
         _login(driver)
-        log.info("Logged in — starting per-date backfill loop (%d dates)", len(dates))
+
+        # Enter the access key once — it persists for the duration of this session
+        driver.get(f"{TABLEAU_SERVER}/views/{_WORKBOOK}/{_GP_OVERVIEW}")
+        _wait_for_tableau(driver, extra=2)
+        _switch_to_viz_frame(driver)
+        _enter_access_key(driver)
+        log.info("Access key entered — starting per-date backfill loop (%d dates)", len(dates))
 
         for d in dates:
             iso = d.strftime("%Y-%m-%d")
             log.info("--- Backfilling %s ---", iso)
 
-            # Reload GP Overview for each date (session cookie persists, no re-login)
             driver.get(f"{TABLEAU_SERVER}/views/{_WORKBOOK}/{_GP_OVERVIEW}")
             _wait_for_tableau(driver, extra=2)
             _switch_to_viz_frame(driver)
-            _enter_access_key(driver)
 
             if not _set_gp_date_range(driver, d):
                 log.error("Skipping %s — could not set date filter", iso)
