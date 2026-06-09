@@ -6,7 +6,7 @@ Schedule:
   12:10                — also send half-day summary (00:00–12:00)
   00:10                — also send full-day summary for previous day
   15:00                — parse latest category performance xlsx, send summary
-  15:30                — download Daily Sales Update PDF from Tableau, parse, send summary
+  08:15                — download Daily Sales Update PDF from Tableau, parse, send summary
 """
 from __future__ import annotations
 
@@ -189,10 +189,10 @@ if __name__ == "__main__":
     scheduler = BlockingScheduler(timezone="Asia/Hong_Kong")
     scheduler.add_job(run_hourly_job, CronTrigger(minute=10), id="hourly_job")
     scheduler.add_job(run_category_job, CronTrigger(hour=15, minute=0), id="category_job")
-    scheduler.add_job(run_daily_dashboard_job, CronTrigger(hour=15, minute=30), id="daily_dashboard_job")
+    scheduler.add_job(run_daily_dashboard_job, CronTrigger(hour=8, minute=15), id="daily_dashboard_job")
     log.info("Scheduler started — running at :10 past every hour (HKT)")
+    log.info("Daily dashboard job scheduled at 08:15 HKT (Tableau PDF)")
     log.info("Category performance job scheduled at 15:00 HKT")
-    log.info("Daily dashboard job scheduled at 15:30 HKT (Tableau PDF)")
     log.info("Telegram bot listener running — send any question to your bot")
     try:
         scheduler.start()
