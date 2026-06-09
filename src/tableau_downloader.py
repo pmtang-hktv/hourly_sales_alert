@@ -1,12 +1,11 @@
 """Automated download of Category Performance crosstab from Tableau Server.
 
 Flow (matches the manual steps):
-  1. Log in
-  2. On GP Overview, enter the Access Key and press Enter (parameter is workbook-wide)
-  3. Click the "Category Performance" tab
-  4. Set the date range to yesterday (from & to)
-  5. Download > Crosstab (交叉資料表) > Excel > 下載
-  6. Wait for the xlsx to finish downloading into CATEGORY_DIR
+  1. Log in to Tableau Server
+  2. On GP Overview: enter the Access Key, set the date range (from=to=target date)
+  3. Click the "Category Performance" tab (date carries over as a workbook parameter)
+  4. Download > Crosstab (交叉資料表) > Excel > 下載
+  5. Wait for the xlsx, rename it to category_performance_YYYY-MM-DD.xlsx
 """
 from __future__ import annotations
 
@@ -35,14 +34,15 @@ _WAIT = 30
 _DOWNLOAD_TIMEOUT = 120
 _WORKBOOK = "RMDashboard-GPReport"
 _GP_OVERVIEW = "GPOverview"
-_DATE_RE = re.compile(r"^\d{1,2}/\d{1,2}/\d{4}$")
+
+# GP Overview date fields use yyyy/m/d (not zero-padded)
+_DATE_YMD_RE = re.compile(r"^\d{4}/\d+/\d+$")
 
 
 def _make_driver() -> webdriver.Chrome:
     abs_dir = str(Path(CATEGORY_DIR).resolve())
     opts = Options()
-    # Return from driver.get() on DOMContentLoaded instead of full page load —
-    # Tableau's pages keep loading resources long after the page is usable
+    # Return from driver.get() on DOMContentLoaded — Tableau keeps loading long after the page is usable
     opts.page_load_strategy = "eager"
     if TABLEAU_HEADLESS:
         opts.add_argument("--headless=new")
@@ -131,7 +131,7 @@ def _switch_to_viz_frame(driver: webdriver.Chrome):
 
 
 def _debug_dump(driver: webdriver.Chrome, label: str):
-    """Save a screenshot and log all iframes + inputs found in current frame."""
+    """Save a screenshot and log all inputs found in current frame."""
     try:
         path = str(Path(CATEGORY_DIR) / f"debug_{label}.png")
         driver.save_screenshot(path)
@@ -139,32 +139,25 @@ def _debug_dump(driver: webdriver.Chrome, label: str):
     except Exception as e:
         log.info("Screenshot failed: %s", e)
 
-    iframes = driver.find_elements(By.TAG_NAME, "iframe")
-    log.info("Iframes in current frame (%s): %d", label, len(iframes))
-    for i, f in enumerate(iframes):
-        log.info("  iframe[%d] id=%s src=%s", i, f.get_attribute("id"), (f.get_attribute("src") or "")[:80])
-
     inputs = driver.find_elements(By.TAG_NAME, "input")
     log.info("Inputs in current frame (%s): %d", label, len(inputs))
     for i, inp in enumerate(inputs):
         try:
-            rect = inp.rect
             parent_html = driver.execute_script(
                 "return arguments[0].parentElement ? arguments[0].parentElement.outerHTML : '';", inp
             )[:300]
             log.info(
-                "  input[%d] type=%s class=%s value=%s displayed=%s enabled=%s readonly=%s rect=%s",
-                i, inp.get_attribute("type"), inp.get_attribute("class"), inp.get_attribute("value"),
-                inp.is_displayed(), inp.is_enabled(), inp.get_attribute("readonly"), rect,
+                "  input[%d] type=%s class=%s value=%r displayed=%s rect=%s",
+                i, inp.get_attribute("type"), inp.get_attribute("class"),
+                inp.get_attribute("value"), inp.is_displayed(), inp.rect,
             )
             log.info("      parentHTML[%d]: %s", i, parent_html)
         except Exception as e:
             log.info("  input[%d] inspect failed: %s", i, e)
 
 
-def _find_access_key_input(driver: webdriver.Chrome) -> webdriver.remote.webelement.WebElement | None:
+def _find_access_key_input(driver: webdriver.Chrome):
     """Search current frame (and one level of nested iframes) for the Access Key text input."""
-    # Try in the current frame first
     strategies = [
         (By.CSS_SELECTOR, "input.QueryBox"),
         (By.XPATH, "//input[contains(@class,'QueryBox')]"),
@@ -176,12 +169,11 @@ def _find_access_key_input(driver: webdriver.Chrome) -> webdriver.remote.webelem
     for by, sel in strategies:
         try:
             el = WebDriverWait(driver, 5).until(EC.element_to_be_clickable((by, sel)))
-            log.info("Found Access Key input in current frame via: %s", sel)
+            log.info("Found Access Key input via: %s", sel)
             return el
         except TimeoutException:
             continue
 
-    # Try each nested iframe
     iframes = driver.find_elements(By.TAG_NAME, "iframe")
     log.info("Searching %d nested iframes for Access Key input", len(iframes))
     for i, frame in enumerate(iframes):
@@ -206,7 +198,7 @@ def _find_access_key_input(driver: webdriver.Chrome) -> webdriver.remote.webelem
 
 
 def _enter_access_key(driver: webdriver.Chrome):
-    """Type the access key into the only plain text input in the filter bar (GP Overview)."""
+    """Type the access key into the Access Key text input on GP Overview."""
     if not TABLEAU_HEADLESS:
         _debug_dump(driver, "before_access_key")
     key_input = _find_access_key_input(driver)
@@ -218,6 +210,84 @@ def _enter_access_key(driver: webdriver.Chrome):
     key_input.send_keys(Keys.RETURN)
     _wait_for_tableau(driver, extra=2)
     log.info("Entered access key — data loaded")
+
+
+def _find_date_inputs(driver: webdriver.Chrome) -> list:
+    """Return visible text inputs whose current value is in yyyy/m/d format."""
+    all_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='text'], input:not([type])")
+    return [
+        el for el in all_inputs
+        if el.is_displayed() and _DATE_YMD_RE.match(el.get_attribute("value") or "")
+    ]
+
+
+def _type_into_date_input(driver: webdriver.Chrome, inp, date_str: str):
+    """Click a date input, select-all, replace with date_str, confirm with Enter."""
+    driver.execute_script("arguments[0].click();", inp)
+    time.sleep(0.3)
+    inp.send_keys(Keys.CONTROL, "a")
+    inp.send_keys(Keys.COMMAND, "a")   # macOS select-all
+    inp.send_keys(Keys.DELETE)
+    inp.send_keys(date_str)
+    inp.send_keys(Keys.RETURN)
+
+
+def _set_gp_date_range(driver: webdriver.Chrome, d) -> bool:
+    """Set the GP Overview Date filter (from and to) to a single day d.
+
+    The GP Overview date fields accept yyyy/m/d by direct typing. Setting
+    from=to=target_date produces a single-day report. If the inputs are not
+    immediately visible, we try clicking any visible date-text element first
+    (Tableau sometimes shows the date as clickable text that reveals an input).
+
+    Returns True if the from date was successfully set.
+    """
+    date_str = f"{d.year}/{d.month}/{d.day}"   # e.g. "2026/6/7" (no zero-padding)
+    log.info("Setting GP Overview date range to %s", date_str)
+
+    try:
+        # Attempt 1: find inputs that already show a date value
+        date_inputs = _find_date_inputs(driver)
+
+        if not date_inputs:
+            # Attempt 2: click a visible date-text element to reveal the input
+            candidates = [
+                el for el in driver.find_elements(By.XPATH,
+                    "//*[self::span or self::div or self::td][not(self::input)]")
+                if el.is_displayed() and _DATE_YMD_RE.match((el.text or "").strip())
+            ]
+            if candidates:
+                log.info("Clicking date text element to reveal input: %r", candidates[0].text)
+                driver.execute_script("arguments[0].click();", candidates[0])
+                time.sleep(0.5)
+                date_inputs = _find_date_inputs(driver)
+
+        if not date_inputs:
+            if not TABLEAU_HEADLESS:
+                _debug_dump(driver, "gp_date_not_found")
+            log.warning("No date inputs found on GP Overview — skipping date set")
+            return False
+
+        # Set the "from" date (leftmost / first input)
+        _type_into_date_input(driver, date_inputs[0], date_str)
+        time.sleep(0.5)
+
+        # Re-fetch inputs after setting "from" (DOM may update)
+        date_inputs2 = _find_date_inputs(driver)
+        to_candidates = date_inputs2 if len(date_inputs2) >= 2 else date_inputs
+        if len(to_candidates) >= 2:
+            _type_into_date_input(driver, to_candidates[1], date_str)
+            time.sleep(0.5)
+
+        _wait_for_tableau(driver, extra=1.5)
+        log.info("GP Overview date set to %s", date_str)
+        return True
+
+    except Exception as exc:
+        log.warning("Failed to set GP Overview date: %s", exc)
+        if not TABLEAU_HEADLESS:
+            _debug_dump(driver, "gp_date_error")
+        return False
 
 
 def _click_category_tab(driver: webdriver.Chrome):
@@ -238,67 +308,10 @@ def _click_category_tab(driver: webdriver.Chrome):
     raise RuntimeError("Could not find the Category Performance tab")
 
 
-def _readout_text(driver: webdriver.Chrome, bound: str) -> str:
-    """Return the displayed text of a range-date bound ('Lower' or 'Upper')."""
-    try:
-        el = driver.find_element(By.CSS_SELECTOR, f"div.QF{bound}Bound .readoutText")
-        return (el.text or el.get_attribute("textContent") or "").strip()
-    except Exception:
-        return ""
-
-
-def _set_one_bound(driver: webdriver.Chrome, bound: str, date_str: str):
-    """Set a single range-date bound. bound is 'Lower' or 'Upper'.
-
-    The bound is a QFReadout div with onclick:show{Lower|Upper}Input — clicking it
-    reveals the hidden <input>; we then clear and type the date.
-    """
-    readout = WebDriverWait(driver, 15).until(
-        EC.presence_of_element_located((By.CSS_SELECTOR, f"div.QF{bound}Bound"))
-    )
-    driver.execute_script("arguments[0].click();", readout)  # fires show{Bound}Input
-    time.sleep(0.6)
-    inp = readout.find_element(By.TAG_NAME, "input")
-    WebDriverWait(driver, 8).until(lambda d: inp.is_displayed())
-    inp.send_keys(Keys.CONTROL, "a")
-    inp.send_keys(Keys.COMMAND, "a")  # macOS select-all
-    inp.send_keys(Keys.DELETE)
-    inp.send_keys(date_str)
-    inp.send_keys(Keys.RETURN)
-    time.sleep(1)
-
-
-def _set_date_range(driver: webdriver.Chrome, date_str: str, verify: bool = False) -> bool:
-    """Set both bounds of the range-date filter to date_str (DD/MM/YYYY).
-
-    Returns True if both readouts show date_str afterwards. When verify=True and the
-    readback doesn't match, returns False so the caller can skip a wrongly-dated file.
-    """
-    try:
-        for bound in ("Lower", "Upper"):
-            try:
-                _set_one_bound(driver, bound, date_str)
-            except Exception as exc:
-                log.warning("Failed to set %s bound: %s", bound, exc)
-
-        _wait_for_tableau(driver, extra=2)
-
-        lower, upper = _readout_text(driver, "Lower"), _readout_text(driver, "Upper")
-        ok = (lower == date_str and upper == date_str)
-        if ok:
-            log.info("Set date range to %s (verified)", date_str)
-        else:
-            log.warning("Date range readback mismatch — wanted %s, got [%s, %s]", date_str, lower, upper)
-        return ok
-    except Exception as exc:
-        log.warning("Could not set date range (%s): %s", date_str, exc)
-        return False
-
-
 def _download_crosstab(driver: webdriver.Chrome):
     wait = WebDriverWait(driver, _WAIT)
 
-    # 1. Click the Download toolbar button (icon left of 共用/Share)
+    # 1. Click the Download toolbar button
     dl_btn = None
     for by, sel in [
         (By.CSS_SELECTOR, "[data-tb-test-id='DownloadButton-Button']"),
@@ -335,7 +348,7 @@ def _download_crosstab(driver: webdriver.Chrome):
             continue
     time.sleep(1.5)
 
-    # 3. In the dialog, Excel is the default format — click 下載 (Download)
+    # 3. Excel is the default format — click 下載
     for by, sel in [
         (By.CSS_SELECTOR, "[data-tb-test-id='export-crosstab-export-Button']"),
         (By.XPATH, "//button[normalize-space()='下載']"),
@@ -345,7 +358,7 @@ def _download_crosstab(driver: webdriver.Chrome):
         try:
             btn = wait.until(EC.element_to_be_clickable((by, sel)))
             btn.click()
-            log.info("Clicked 下載 (Download) in crosstab dialog")
+            log.info("Clicked 下載 in crosstab dialog")
             return
         except TimeoutException:
             continue
@@ -356,7 +369,6 @@ def _wait_for_download(since: float, date_str: str) -> str | None:
     """Wait for a new xlsx to finish downloading, then rename it to include the data date."""
     deadline = time.time() + _DOWNLOAD_TIMEOUT
     while time.time() < deadline:
-        # An in-progress Chrome download leaves a .crdownload file
         partial = [f for f in os.listdir(CATEGORY_DIR) if f.endswith(".crdownload")]
         candidates = [
             os.path.join(CATEGORY_DIR, f)
@@ -385,9 +397,8 @@ def download_category_performance() -> str | None:
         return None
 
     os.makedirs(CATEGORY_DIR, exist_ok=True)
-    d = datetime.now() - timedelta(days=1)
-    date_str = f"{d.day:02d}/{d.month:02d}/{d.year}"  # Tableau display format e.g. 07/06/2026
-    file_date = d.strftime("%Y-%m-%d")  # for filename e.g. 2026-06-07
+    d = (datetime.now() - timedelta(days=1)).date()
+    file_date = d.strftime("%Y-%m-%d")
     start = time.time()
     driver = None
     try:
@@ -396,14 +407,16 @@ def download_category_performance() -> str | None:
 
         driver.get(f"{TABLEAU_SERVER}/views/{_WORKBOOK}/{_GP_OVERVIEW}")
         _wait_for_tableau(driver, extra=2)
-        log.info("Loaded GP Overview view")
+        log.info("Loaded GP Overview")
 
         _switch_to_viz_frame(driver)
         _enter_access_key(driver)
-        _click_category_tab(driver)
-        if not _set_date_range(driver, date_str, verify=True):
-            log.error("Could not set date filter to %s — aborting to avoid wrong-day data", date_str)
+
+        if not _set_gp_date_range(driver, d):
+            log.error("Could not set date filter to %s — aborting to avoid wrong-day data", file_date)
             return None
+
+        _click_category_tab(driver)
         _download_crosstab(driver)
 
         path = _wait_for_download(since=start, date_str=file_date)
@@ -422,10 +435,9 @@ def download_category_performance() -> str | None:
 def backfill_category_performance(dates: list) -> dict:
     """Download Category Performance for each date in `dates` (list of date objects).
 
-    Strategy: log in once, enter the access key and open the Category Performance tab
-    once, then for each date set the range-date filter (both bounds) to that day,
-    verify it applied, and download. The access key parameter persists across filter
-    changes, so no reload is needed between dates. Returns {iso_date: path_or_None}.
+    For each date: reload GP Overview (session persists — no re-login), enter the
+    access key, set the date range on GP Overview, switch to Category Performance,
+    and download. Returns {iso_date: path_or_None}.
     """
     results: dict = {}
     if not all([TABLEAU_SERVER, TABLEAU_USERNAME, TABLEAU_PASSWORD, TABLEAU_ACCESS_KEY]):
@@ -437,23 +449,24 @@ def backfill_category_performance(dates: list) -> dict:
     try:
         driver = _make_driver()
         _login(driver)
-
-        driver.get(f"{TABLEAU_SERVER}/views/{_WORKBOOK}/{_GP_OVERVIEW}")
-        _wait_for_tableau(driver, extra=2)
-        _switch_to_viz_frame(driver)
-        _enter_access_key(driver)
-        _click_category_tab(driver)
-        log.info("Access key applied, Category Performance tab open — starting per-date loop")
+        log.info("Logged in — starting per-date backfill loop (%d dates)", len(dates))
 
         for d in dates:
             iso = d.strftime("%Y-%m-%d")
-            date_str = f"{d.day:02d}/{d.month:02d}/{d.year}"  # DD/MM/YYYY
             log.info("--- Backfilling %s ---", iso)
 
-            if not _set_date_range(driver, date_str, verify=True):
-                log.error("Skipping %s — could not set/verify date filter", iso)
+            # Reload GP Overview for each date (session cookie persists, no re-login)
+            driver.get(f"{TABLEAU_SERVER}/views/{_WORKBOOK}/{_GP_OVERVIEW}")
+            _wait_for_tableau(driver, extra=2)
+            _switch_to_viz_frame(driver)
+            _enter_access_key(driver)
+
+            if not _set_gp_date_range(driver, d):
+                log.error("Skipping %s — could not set date filter", iso)
                 results[iso] = None
                 continue
+
+            _click_category_tab(driver)
 
             start = time.time()
             try:
@@ -467,11 +480,13 @@ def backfill_category_performance(dates: list) -> dict:
             except Exception as exc:
                 log.error("Download failed for %s: %s", iso, exc)
                 results[iso] = None
+
             time.sleep(2)
 
         return results
+
     except Exception as exc:
-        log.error("Backfill failed: %s", exc, exc_info=True)
+        log.error("Backfill session failed: %s", exc, exc_info=True)
         return results
     finally:
         if driver:
