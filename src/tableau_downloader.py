@@ -19,6 +19,8 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
+import requests
+
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.options import Options
@@ -29,7 +31,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
-from src.config import CATEGORY_DIR, DAILY_DIR, TABLEAU_ACCESS_KEY, TABLEAU_HEADLESS, TABLEAU_PASSWORD, TABLEAU_SERVER, TABLEAU_USERNAME
+from src.config import CATEGORY_DIR, DAILY_DIR, TABLEAU_ACCESS_KEY, TABLEAU_HEADLESS, TABLEAU_PAT_NAME, TABLEAU_PAT_SECRET, TABLEAU_PASSWORD, TABLEAU_SERVER, TABLEAU_USERNAME
 
 log = logging.getLogger(__name__)
 
@@ -509,139 +511,76 @@ def backfill_category_performance(dates: list) -> dict:
             driver.quit()
 
 
-# ── Daily Sales Update ────────────────────────────────────────────────────────
+# ── Daily Sales Update (Tableau REST API) ─────────────────────────────────────
 
-def _download_pdf(driver: webdriver.Chrome):
-    """Click Download > PDF > 下載. Each selector gets up to 30 s to become clickable."""
-    wait = WebDriverWait(driver, _WAIT)
-
-    for by, sel in [
-        (By.CSS_SELECTOR, "[data-tb-test-id='DownloadButton-Button']"),
-        (By.CSS_SELECTOR, "button[title='Download']"),
-        (By.CSS_SELECTOR, "button[aria-label='Download']"),
-        (By.XPATH, "//button[contains(@aria-label,'下載') or contains(@title,'下載')]"),
-        (By.CSS_SELECTOR, "[data-tb-test-id*='ownload']"),
-        (By.CSS_SELECTOR, "[data-tb-test-id='viz-viewer-toolbar-button-download']"),
-    ]:
-        try:
-            wait.until(EC.element_to_be_clickable((by, sel))).click()
-            log.info("Clicked Download button via: %s", sel)
-            break
-        except TimeoutException:
-            continue
-    else:
-        raise RuntimeError("Could not find Download button")
-    time.sleep(1)
-
-    for by, sel in [
-        (By.CSS_SELECTOR, "[data-tb-test-id='DownloadPdf-Button']"),
-        (By.XPATH, "//*[normalize-space()='PDF']"),
-    ]:
-        try:
-            wait.until(EC.element_to_be_clickable((by, sel))).click()
-            log.info("Clicked PDF option")
-            break
-        except TimeoutException:
-            continue
-    time.sleep(1.5)
-
-    for by, sel in [
-        (By.CSS_SELECTOR, "[data-tb-test-id='export-pdf-export-Button']"),
-        (By.XPATH, "//button[normalize-space()='下載']"),
-        (By.XPATH, "//button[normalize-space()='Download']"),
-    ]:
-        try:
-            wait.until(EC.element_to_be_clickable((by, sel))).click()
-            log.info("Clicked 下載 in PDF dialog")
-            return
-        except TimeoutException:
-            continue
-    raise RuntimeError("Could not click 下載 in PDF dialog")
-
-
-def _wait_for_pdf(since: float, date_str: str) -> str | None:
-    """Wait for a new PDF to finish downloading, then rename and move it to DAILY_DIR."""
-    search_dirs = [DAILY_DIR, str(Path.home() / "Downloads")]
-    deadline = time.time() + _DOWNLOAD_TIMEOUT
-    last_log = time.time()
-    while time.time() < deadline:
-        partial: list[str] = []
-        recent: list[str] = []
-        for d in search_dirs:
-            if not os.path.isdir(d):
-                continue
-            partial += [f for f in os.listdir(d) if f.endswith(".crdownload")]
-            candidates = [
-                os.path.join(d, f)
-                for f in os.listdir(d)
-                if f.endswith(".pdf") and not f.startswith(".")
-            ]
-            recent += [p for p in candidates if os.path.getmtime(p) >= since - 2]
-        if time.time() - last_log >= 15:
-            log.info("Waiting for PDF... partial=%s recent_pdfs=%s", partial, [os.path.basename(p) for p in recent])
-            last_log = time.time()
-        if recent and not partial:
-            newest = max(recent, key=os.path.getmtime)
-            size1 = os.path.getsize(newest)
-            time.sleep(2)
-            size2 = os.path.getsize(newest)
-            if size1 == size2 > 0:
-                target = os.path.join(DAILY_DIR, f"daily_sales_{date_str}.pdf")
-                os.replace(newest, target)
-                log.info("Downloaded PDF: %s (%d bytes)", target, size2)
-                return target
-        time.sleep(2)
-    return None
-
-
-def _parse_daily_data_date(driver: webdriver.Chrome) -> str | None:
-    """Extract the data date from the page title 'Daily Sales Update - D/M/YYYY'.
-    Returns YYYY-MM-DD string or None if not found."""
-    try:
-        import re as _re
-        title = driver.title or ""
-        m = _re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})", title)
-        if m:
-            day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
-            return f"{year}-{month:02d}-{day:02d}"
-    except Exception:
-        pass
-    return None
+_API_VERSION = "3.15"
 
 
 def download_daily_sales_update() -> str | None:
-    """Download the Daily Sales Update PDF from Tableau for yesterday. Returns path or None."""
-    if not all([TABLEAU_SERVER, TABLEAU_USERNAME, TABLEAU_PASSWORD]):
-        log.warning("Tableau credentials not configured — skipping download")
+    """Download the Daily Sales Update PDF via Tableau REST API using a PAT."""
+    if not all([TABLEAU_SERVER, TABLEAU_PAT_NAME, TABLEAU_PAT_SECRET]):
+        log.warning("Tableau PAT credentials not configured — skipping download")
         return None
 
     os.makedirs(DAILY_DIR, exist_ok=True)
-    d = (datetime.now() - timedelta(days=1)).date()
-    file_date = d.strftime("%Y-%m-%d")
-    start = time.time()
-    driver = None
+    file_date = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    base = f"{TABLEAU_SERVER}/api/{_API_VERSION}"
+
     try:
-        view_url = f"{TABLEAU_SERVER}/views/{_DAILY_WORKBOOK}/{_DAILY_SHEET}"
-        driver = _make_driver(download_dir=DAILY_DIR)
-        _login(driver, target_url=view_url)
-        _wait_for_tableau(driver, extra=4)
-        log.info("Loaded Daily Sales Update view")
+        # 1. Sign in
+        resp = requests.post(
+            f"{base}/auth/signin",
+            json={"credentials": {
+                "personalAccessTokenName": TABLEAU_PAT_NAME,
+                "personalAccessTokenSecret": TABLEAU_PAT_SECRET,
+                "site": {"contentUrl": ""},
+            }},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        creds = resp.json()["credentials"]
+        token = creds["token"]
+        site_id = creds["site"]["id"]
+        headers = {"x-tableau-auth": token, "accept": "application/json"}
+        log.info("Signed in to Tableau REST API (site_id=%s)", site_id)
 
-        # Read the actual data date from the page title ("Daily Sales Update - 8/6/2026")
-        # so the filename reflects the data date, not just "yesterday".
-        file_date = _parse_daily_data_date(driver) or file_date
-        log.info("Data date: %s", file_date)
+        # 2. Find the view by URL name
+        resp = requests.get(
+            f"{base}/sites/{site_id}/views",
+            headers=headers,
+            params={"filter": f"viewUrlName:eq:{_DAILY_SHEET}"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+        views = resp.json().get("views", {}).get("view", [])
+        if not views:
+            log.error("No view found with urlName=%s", _DAILY_SHEET)
+            return None
+        view_id = views[0]["id"]
+        log.info("Found view: id=%s name=%s", view_id, views[0].get("name"))
 
-        _download_pdf(driver)
+        # 3. Download PDF
+        resp = requests.get(
+            f"{base}/sites/{site_id}/views/{view_id}/pdf",
+            headers={**headers, "accept": "application/pdf"},
+            params={"type": "A4", "orientation": "Landscape"},
+            timeout=120,
+            stream=True,
+        )
+        resp.raise_for_status()
 
-        path = _wait_for_pdf(since=start, date_str=file_date)
-        if not path:
-            log.error("PDF download timed out after %ds", _DOWNLOAD_TIMEOUT)
+        path = os.path.join(DAILY_DIR, f"daily_sales_{file_date}.pdf")
+        with open(path, "wb") as f:
+            for chunk in resp.iter_content(chunk_size=65536):
+                f.write(chunk)
+        size = os.path.getsize(path)
+        log.info("Downloaded PDF via REST API: %s (%d bytes)", path, size)
+
+        # 4. Sign out
+        requests.post(f"{base}/auth/signout", headers=headers, timeout=10)
+
         return path
 
     except Exception as exc:
-        log.error("Daily Sales Update download failed: %s", exc, exc_info=True)
+        log.error("Daily Sales Update REST API download failed: %s", exc, exc_info=True)
         return None
-    finally:
-        if driver:
-            driver.quit()
