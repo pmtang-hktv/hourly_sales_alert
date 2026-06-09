@@ -45,8 +45,6 @@ _GP_OVERVIEW = "GPOverview"
 _DAILY_WORKBOOK = "DailySalesUpdate-BQSimplfied"
 _DAILY_SHEET = "DailySalesUpdate"
 
-# GP Overview date fields use yyyy/m/d (not zero-padded)
-_DATE_YMD_RE = re.compile(r"^\d{4}/\d+/\d+$")
 
 
 def _make_driver(download_dir: str | None = None) -> webdriver.Chrome:
@@ -218,81 +216,72 @@ def _enter_access_key(driver: webdriver.Chrome):
     log.info("Entered access key — data loaded")
 
 
-def _find_date_inputs(driver: webdriver.Chrome) -> list:
-    """Return visible text inputs whose current value is in yyyy/m/d format."""
-    all_inputs = driver.find_elements(By.CSS_SELECTOR, "input[type='text'], input:not([type])")
-    return [
-        el for el in all_inputs
-        if el.is_displayed() and _DATE_YMD_RE.match(el.get_attribute("value") or "")
-    ]
-
-
 def _type_into_date_input(driver: webdriver.Chrome, inp, date_str: str):
-    """Click a date input, select-all, replace with date_str, confirm with Enter."""
+    """Interact with a (possibly hidden) Tableau date input. JS-clicks it, then tries
+    send_keys; if that fails (element not interactable), falls back to JS value injection
+    plus synthetic change/keydown events so the Dojo widget picks up the new value."""
     driver.execute_script("arguments[0].click();", inp)
     time.sleep(0.3)
-    inp.send_keys(Keys.CONTROL, "a")
-    inp.send_keys(Keys.COMMAND, "a")   # macOS select-all
-    inp.send_keys(Keys.DELETE)
-    inp.send_keys(date_str)
-    inp.send_keys(Keys.RETURN)
+    try:
+        inp.send_keys(Keys.CONTROL, "a")
+        inp.send_keys(Keys.COMMAND, "a")
+        inp.send_keys(Keys.DELETE)
+        inp.send_keys(date_str)
+        inp.send_keys(Keys.RETURN)
+    except Exception:
+        # Hidden / non-interactable — inject value via JS and fire events
+        driver.execute_script(
+            "var el=arguments[0], v=arguments[1];"
+            "el.value=v;"
+            "el.dispatchEvent(new Event('input',{bubbles:true}));"
+            "el.dispatchEvent(new Event('change',{bubbles:true}));"
+            "el.dispatchEvent(new KeyboardEvent('keydown',{keyCode:13,bubbles:true}));",
+            inp, date_str,
+        )
+        log.info("Set date via JS injection: %s", date_str)
 
 
 def _set_gp_date_range(driver: webdriver.Chrome, d) -> bool:
     """Set the GP Overview Date filter (from and to) to a single day d.
 
-    The GP Overview date fields accept yyyy/m/d by direct typing. Setting
-    from=to=target_date produces a single-day report. If the inputs are not
-    immediately visible, we try clicking any visible date-text element first
-    (Tableau sometimes shows the date as clickable text that reveals an input).
+    The date inputs are hidden inside QFReadout divs. Clicking each div triggers
+    Tableau/Dojo's showLowerInput / showUpperInput handler. We JS-click the div,
+    then interact with the child input (via send_keys or JS fallback).
+    Date format used by the Tableau widget: dd/MM/yyyy (e.g. 07/06/2026).
 
-    Returns True if the from date was successfully set.
+    Returns True if the from-date was successfully set.
     """
-    date_str = f"{d.year}/{d.month}/{d.day}"   # e.g. "2026/6/7" (no zero-padding)
+    date_str = d.strftime("%d/%m/%Y")
     log.info("Setting GP Overview date range to %s", date_str)
 
-    try:
-        # Attempt 1: find inputs that already show a date value
-        date_inputs = _find_date_inputs(driver)
-
-        if not date_inputs:
-            # Attempt 2: click a visible date-text element to reveal the input
-            candidates = [
-                el for el in driver.find_elements(By.XPATH,
-                    "//*[self::span or self::div or self::td][not(self::input)]")
-                if el.is_displayed() and _DATE_YMD_RE.match((el.text or "").strip())
-            ]
-            if candidates:
-                log.info("Clicking date text element to reveal input: %r", candidates[0].text)
-                driver.execute_script("arguments[0].click();", candidates[0])
-                time.sleep(0.5)
-                date_inputs = _find_date_inputs(driver)
-
-        if not date_inputs:
-            if not TABLEAU_HEADLESS:
-                _debug_dump(driver, "gp_date_not_found")
-            log.warning("No date inputs found on GP Overview — skipping date set")
+    def _set_bound(div_css: str, label: str) -> bool:
+        try:
+            div = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.CSS_SELECTOR, div_css))
+            )
+            driver.execute_script("arguments[0].click();", div)
+            time.sleep(0.6)
+            inp = div.find_element(By.CSS_SELECTOR, "input")
+            _type_into_date_input(driver, inp, date_str)
+            log.info("Set %s to %s", label, date_str)
+            return True
+        except Exception as exc:
+            log.warning("Failed to set %s: %s", label, exc)
             return False
 
-        # Set the "from" date (leftmost / first input)
-        _type_into_date_input(driver, date_inputs[0], date_str)
+    try:
+        from_ok = _set_bound(".QFLowerBound", "from-date")
+        time.sleep(0.5)
+        _set_bound(".QFUpperBound", "to-date")
         time.sleep(0.5)
 
-        # Re-fetch inputs after setting "from" (DOM may update)
-        date_inputs2 = _find_date_inputs(driver)
-        to_candidates = date_inputs2 if len(date_inputs2) >= 2 else date_inputs
-        if len(to_candidates) >= 2:
-            _type_into_date_input(driver, to_candidates[1], date_str)
-            time.sleep(0.5)
-
         _wait_for_tableau(driver, extra=1.5)
-        log.info("GP Overview date set to %s", date_str)
-        return True
+        log.info("GP Overview date filter set to %s", date_str)
+        return from_ok
 
     except Exception as exc:
-        log.warning("Failed to set GP Overview date: %s", exc)
-        if not TABLEAU_HEADLESS:
-            _debug_dump(driver, "gp_date_error")
+        log.warning("Failed to set GP Overview date range: %s", exc)
+        _debug_dump(driver, "gp_date_error")
         return False
 
 
