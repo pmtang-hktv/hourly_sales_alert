@@ -588,8 +588,8 @@ def download_daily_sales_update() -> str | None:
         file_date = _parse_daily_data_date(driver) or file_date
         log.info("Data date: %s", file_date)
 
-        # Download button is in the Tableau Server toolbar (main frame), not the viz iframe —
-        # do NOT call _switch_to_viz_frame here.
+        # Download button lives inside the viz iframe, not the outer page chrome.
+        _switch_to_viz_frame(driver)
         _download_pdf(driver)
 
         path = _wait_for_pdf(since=start, date_str=file_date)
