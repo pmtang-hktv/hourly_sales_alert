@@ -309,11 +309,12 @@ def _click_category_tab(driver: webdriver.Chrome):
 
 def _click_download_button(driver: webdriver.Chrome):
     """Click the Tableau Download toolbar button (works in both main frame and viz frame)."""
-    btn = WebDriverWait(driver, 20).until(EC.element_to_be_clickable((By.CSS_SELECTOR,
+    btn = WebDriverWait(driver, 45).until(EC.element_to_be_clickable((By.CSS_SELECTOR,
         "[data-tb-test-id='DownloadButton-Button'], "
         "button[title='Download'], button[aria-label='Download'], "
         "button[title='下載'], button[aria-label='下載'], "
-        ".tab-toolbar-btn-download, [data-tb-test-id*='ownload']"
+        ".tab-toolbar-btn-download, [data-tb-test-id*='ownload'], "
+        "[data-tb-test-id*='Download']"
     )))
     btn.click()
     log.info("Clicked Download button")
@@ -529,7 +530,7 @@ def download_daily_sales_update() -> str | None:
         view_url = f"{TABLEAU_SERVER}/views/{_DAILY_WORKBOOK}/{_DAILY_SHEET}"
         driver = _make_driver(download_dir=DAILY_DIR)
         _login(driver, target_url=view_url)
-        _wait_for_tableau(driver, extra=2)
+        _wait_for_tableau(driver, extra=4)
         log.info("Loaded Daily Sales Update view")
 
         # Download button is in the Tableau Server toolbar (main frame), not the viz iframe —
