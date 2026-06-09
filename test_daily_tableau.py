@@ -92,9 +92,13 @@ def screenshot(label):
     log.info("Screenshot: %s", path)
 
 # ── 1. Login ──────────────────────────────────────────────────────────────────
+VIEW_URL = f"{TABLEAU_SERVER}/views/{WORKBOOK}/{SHEET}"
+
+# ── 1. Login — navigate directly to the view URL so Tableau redirects through
+#    signin and back (saves one extra page load vs going to /#/signin first) ──
 log.info("Logging in...")
-driver.get(f"{TABLEAU_SERVER}/#/signin")
-f = WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.CSS_SELECTOR,
+driver.get(VIEW_URL)
+f = WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.CSS_SELECTOR,
     "input#username, input[name='username'], input[autocomplete='username'], input[type='text']"
 )))
 f.clear(); f.send_keys(TABLEAU_USERNAME)
@@ -105,13 +109,12 @@ p.clear(); p.send_keys(TABLEAU_PASSWORD)
 WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.CSS_SELECTOR,
     "button[type='submit'], button.signin-btn, #signin-btn, input[type='submit']"
 ))).click()
-WebDriverWait(driver, 15).until(lambda d: "signin" not in d.current_url.lower())
+WebDriverWait(driver, 30).until(lambda d: "signin" not in d.current_url.lower())
 log.info("Logged in")
 
-# ── 2. Open the Daily Sales Update view ───────────────────────────────────────
-log.info("Opening Daily Sales Update view...")
-driver.get(f"{TABLEAU_SERVER}/views/{WORKBOOK}/{SHEET}")
-wait_for_tableau(extra=3)
+# ── 2. Wait for view to finish loading ────────────────────────────────────────
+log.info("Waiting for Daily Sales Update view...")
+wait_for_tableau(extra=2)
 switch_to_viz_frame()
 screenshot("01_loaded")
 

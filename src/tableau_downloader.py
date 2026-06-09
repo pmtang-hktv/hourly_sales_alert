@@ -76,12 +76,13 @@ def _wait_for_tableau(driver: webdriver.Chrome, extra: float = 2.0):
     time.sleep(extra)
 
 
-def _login(driver: webdriver.Chrome):
-    driver.get(f"{TABLEAU_SERVER}/#/signin")
+def _login(driver: webdriver.Chrome, target_url: str | None = None):
+    """Log in to Tableau. Navigate directly to target_url (e.g. the view) so Tableau
+    redirects through signin and back — saves one extra page load vs going to /#/signin first."""
+    dest = target_url or f"{TABLEAU_SERVER}/#/signin"
+    driver.get(dest)
 
-    # Combine all candidate selectors into one CSS query — finds whichever exists
-    # without waiting for each to time out individually.
-    f = WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.CSS_SELECTOR,
+    f = WebDriverWait(driver, 25).until(EC.presence_of_element_located((By.CSS_SELECTOR,
         "input#username, input[name='username'], input[autocomplete='username'], input[type='text']"
     )))
     f.clear()
@@ -98,7 +99,7 @@ def _login(driver: webdriver.Chrome):
     )))
     btn.click()
 
-    WebDriverWait(driver, 15).until(lambda d: "signin" not in d.current_url.lower())
+    WebDriverWait(driver, 30).until(lambda d: "signin" not in d.current_url.lower())
     log.info("Logged in to Tableau Server")
 
 
@@ -395,10 +396,9 @@ def download_category_performance() -> str | None:
     start = time.time()
     driver = None
     try:
+        gp_url = f"{TABLEAU_SERVER}/views/{_WORKBOOK}/{_GP_OVERVIEW}"
         driver = _make_driver()
-        _login(driver)
-
-        driver.get(f"{TABLEAU_SERVER}/views/{_WORKBOOK}/{_GP_OVERVIEW}")
+        _login(driver, target_url=gp_url)   # navigate directly — skips extra /#/signin load
         _wait_for_tableau(driver, extra=2)
         log.info("Loaded GP Overview")
 
@@ -440,11 +440,11 @@ def backfill_category_performance(dates: list) -> dict:
     os.makedirs(CATEGORY_DIR, exist_ok=True)
     driver = None
     try:
+        gp_url = f"{TABLEAU_SERVER}/views/{_WORKBOOK}/{_GP_OVERVIEW}"
         driver = _make_driver()
-        _login(driver)
+        _login(driver, target_url=gp_url)   # navigate directly — skips extra /#/signin load
 
         # Enter the access key once — it persists for the duration of this session
-        driver.get(f"{TABLEAU_SERVER}/views/{_WORKBOOK}/{_GP_OVERVIEW}")
         _wait_for_tableau(driver, extra=2)
         _switch_to_viz_frame(driver)
         _enter_access_key(driver)
