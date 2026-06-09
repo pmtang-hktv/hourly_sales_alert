@@ -29,4 +29,4 @@ TABLEAU_SERVER = os.getenv("TABLEAU_SERVER", "https://inhouse-analytics.hktv.com
 TABLEAU_USERNAME = os.getenv("TABLEAU_USERNAME", "")
 TABLEAU_PASSWORD = os.getenv("TABLEAU_PASSWORD", "")
 TABLEAU_ACCESS_KEY = os.getenv("TABLEAU_ACCESS_KEY", "")
-TABLEAU_HEADLESS = os.getenv("TABLEAU_HEADLESS", "true").lower() not in ("false", "0", "no")
+TABLEAU_HEADLESS = os.getenv("TABLEAU_HEADLESS", "false").lower() not in ("false", "0", "no")
