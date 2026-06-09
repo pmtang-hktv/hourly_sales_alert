@@ -20,6 +20,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 import requests
+import urllib3
+
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
