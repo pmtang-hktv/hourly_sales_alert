@@ -308,17 +308,35 @@ def _click_category_tab(driver: webdriver.Chrome):
 
 
 def _click_download_button(driver: webdriver.Chrome):
-    """Click the Tableau Download toolbar button (works in both main frame and viz frame)."""
-    btn = WebDriverWait(driver, 45).until(EC.element_to_be_clickable((By.CSS_SELECTOR,
-        "[data-tb-test-id='DownloadButton-Button'], "
-        "button[title='Download'], button[aria-label='Download'], "
-        "button[title='下載'], button[aria-label='下載'], "
-        ".tab-toolbar-btn-download, [data-tb-test-id*='ownload'], "
-        "[data-tb-test-id*='Download']"
-    )))
-    btn.click()
-    log.info("Clicked Download button")
-    time.sleep(0.8)
+    """Click the Tableau Download toolbar button.
+
+    Cycles through candidate selectors every 4 s until one is clickable or the
+    45 s deadline is reached. Short per-selector timeouts prevent a hidden element
+    that matches early in DOM order from blocking the whole wait.
+    """
+    _SELECTORS = [
+        (By.CSS_SELECTOR, "[data-tb-test-id='DownloadButton-Button']"),
+        (By.CSS_SELECTOR, "[data-tb-test-id*='ownload']"),
+        (By.CSS_SELECTOR, "[data-tb-test-id*='Download']"),
+        (By.CSS_SELECTOR, "button[title='Download']"),
+        (By.CSS_SELECTOR, "button[aria-label='Download']"),
+        (By.CSS_SELECTOR, "button[title='下載']"),
+        (By.CSS_SELECTOR, "button[aria-label='下載']"),
+        (By.XPATH, "//button[contains(@aria-label,'下載') or contains(@title,'下載')]"),
+        (By.CSS_SELECTOR, ".tab-toolbar-btn-download"),
+    ]
+    deadline = time.time() + 45
+    while time.time() < deadline:
+        for by, sel in _SELECTORS:
+            try:
+                btn = WebDriverWait(driver, 4).until(EC.element_to_be_clickable((by, sel)))
+                btn.click()
+                log.info("Clicked Download button via: %s", sel)
+                time.sleep(0.8)
+                return
+            except TimeoutException:
+                continue
+    raise RuntimeError("Could not find a clickable Download button within 45 s")
 
 
 def _download_crosstab(driver: webdriver.Chrome):
@@ -515,6 +533,21 @@ def _wait_for_pdf(since: float, date_str: str) -> str | None:
     return None
 
 
+def _parse_daily_data_date(driver: webdriver.Chrome) -> str | None:
+    """Extract the data date from the page title 'Daily Sales Update - D/M/YYYY'.
+    Returns YYYY-MM-DD string or None if not found."""
+    try:
+        import re as _re
+        title = driver.title or ""
+        m = _re.search(r"(\d{1,2})/(\d{1,2})/(\d{4})", title)
+        if m:
+            day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            return f"{year}-{month:02d}-{day:02d}"
+    except Exception:
+        pass
+    return None
+
+
 def download_daily_sales_update() -> str | None:
     """Download the Daily Sales Update PDF from Tableau for yesterday. Returns path or None."""
     if not all([TABLEAU_SERVER, TABLEAU_USERNAME, TABLEAU_PASSWORD]):
@@ -532,6 +565,11 @@ def download_daily_sales_update() -> str | None:
         _login(driver, target_url=view_url)
         _wait_for_tableau(driver, extra=4)
         log.info("Loaded Daily Sales Update view")
+
+        # Read the actual data date from the page title ("Daily Sales Update - 8/6/2026")
+        # so the filename reflects the data date, not just "yesterday".
+        file_date = _parse_daily_data_date(driver) or file_date
+        log.info("Data date: %s", file_date)
 
         # Download button is in the Tableau Server toolbar (main frame), not the viz iframe —
         # do NOT call _switch_to_viz_frame here.
