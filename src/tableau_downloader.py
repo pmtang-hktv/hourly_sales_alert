@@ -567,8 +567,7 @@ def download_daily_sales_update() -> str | None:
         # 3. Download PDF
         resp = requests.get(
             f"{base}/sites/{site_id}/views/{view_id}/pdf",
-            headers={**headers, "accept": "application/pdf"},
-            params={"type": "A4", "orientation": "Landscape"},
+            headers=headers,
             timeout=120,
             stream=True,
             verify=False,
