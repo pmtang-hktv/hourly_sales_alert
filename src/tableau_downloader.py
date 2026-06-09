@@ -359,18 +359,20 @@ def _click_download_button(driver: webdriver.Chrome):
 def _download_crosstab(driver: webdriver.Chrome):
     _click_download_button(driver)
 
-    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH,
+    ct_btn = WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.XPATH,
         "//*[@data-tb-test-id='DownloadCrosstab-Button' or "
         "normalize-space()='交叉資料表' or normalize-space()='Crosstab']"
-    ))).click()
+    )))
+    _js_click(driver, ct_btn)
     log.info("Clicked Crosstab")
     time.sleep(1.5)
 
-    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH,
+    dl_btn = WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.XPATH,
         "//*[@data-tb-test-id='export-crosstab-export-Button' or "
         "(local-name()='button' and "
         "(normalize-space()='下載' or normalize-space()='Download'))]"
-    ))).click()
+    )))
+    _js_click(driver, dl_btn)
     log.info("Clicked 下載 in crosstab dialog")
 
 
@@ -507,21 +509,28 @@ def backfill_category_performance(dates: list) -> dict:
 
 # ── Daily Sales Update ────────────────────────────────────────────────────────
 
+def _js_click(driver: webdriver.Chrome, element) -> None:
+    """Click via JavaScript to bypass overlay interception."""
+    driver.execute_script("arguments[0].click();", element)
+
+
 def _download_pdf(driver: webdriver.Chrome):
-    """Click Download > PDF > 下載 in the Tableau Server toolbar (main frame)."""
+    """Click Download > PDF > 下載 in the viz iframe toolbar."""
     _click_download_button(driver)
 
-    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH,
+    pdf_btn = WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.XPATH,
         "//*[@data-tb-test-id='DownloadPdf-Button' or normalize-space()='PDF']"
-    ))).click()
+    )))
+    _js_click(driver, pdf_btn)
     log.info("Clicked PDF option")
-    time.sleep(1)
+    time.sleep(1.5)
 
-    WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.XPATH,
+    dl_btn = WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.XPATH,
         "//*[@data-tb-test-id='export-pdf-export-Button' or "
         "(local-name()='button' and "
         "(normalize-space()='下載' or normalize-space()='Download'))]"
-    ))).click()
+    )))
+    _js_click(driver, dl_btn)
     log.info("Clicked 下載 in PDF dialog")
 
 
