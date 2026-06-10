@@ -40,8 +40,8 @@ def detect_category_anomalies(report_date: str, today: list[dict]) -> list[dict]
         })
 
     anomalies.sort(key=lambda x: abs(x["pct_diff"]), reverse=True)
-    gainers = [a for a in anomalies if a["direction"] == "high"][:3]
-    losers  = [a for a in anomalies if a["direction"] == "low"][:3]
+    gainers = [a for a in anomalies if a["direction"] == "high"][:5]
+    losers  = [a for a in anomalies if a["direction"] == "low"][:5]
     return gainers + losers
 
 
@@ -84,7 +84,7 @@ def build_category_summary(report_date: str) -> dict:
         "total_gp": total_gp,
         "total_gp_pct": (total_gp / total_gmv) if total_gmv else 0,
         "has_gp": has_gp,
-        "top_categories": today[:8],
+        "top_categories": today[:10],
         "has_last_week": bool(last_week),
         "movers": movers[:6],
         "low_margin": low_margin[:8],
