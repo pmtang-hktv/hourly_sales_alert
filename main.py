@@ -20,8 +20,8 @@ from src.analyzer import build_fullday_summary, build_halfday_summary, check_ano
 from src.bot_listener import start_bot_listener
 from src.category_analyzer import build_category_summary
 from src.category_parser import parse_category_file
-from src.config import CATEGORY_DIR
-from src.tableau_downloader import download_category_performance, download_daily_sales_update
+from src.config import CATEGORY_DIR, TABLEAU_PAT2_NAME, TABLEAU_PAT2_SECRET
+from src.tableau_downloader import download_category_gmv_rest, download_category_performance, download_daily_sales_update
 from src.daily_parser import parse_daily_dashboard
 from src.db import alert_sent, get_daily_dashboard, get_day_totals_upto_hour, get_hour_row, init_db, log_alert, upsert_category_rows, upsert_daily, upsert_daily_dashboard, upsert_hourly
 from src.fetcher import fetch_latest_email
@@ -145,15 +145,17 @@ def _latest_category_file() -> str | None:
     return max(files, key=os.path.getmtime)
 
 
-def run_category_job():
-    log.info("Category performance job started")
-    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-    key = f"category_{yesterday}"
-    if alert_sent(key):
-        log.info("Category summary already sent for %s", yesterday)
-        return
+def _fetch_category_rows(yesterday: str) -> list | None:
+    """Get category rows for `yesterday`. Prefers the REST API (PAT2) — fast, no
+    browser. Falls back to the Selenium download + xlsx file parse if PAT2 is
+    not configured or the REST call returns nothing."""
+    if TABLEAU_PAT2_NAME and TABLEAU_PAT2_SECRET:
+        rows = download_category_gmv_rest()
+        if rows:
+            log.info("Category rows via REST API: %d", len(rows))
+            return rows
+        log.warning("REST category download returned no rows — falling back to Selenium")
 
-    # Auto-download from Tableau (falls back to manual file if credentials not set)
     downloaded = download_category_performance()
     if downloaded:
         log.info("Auto-downloaded category file: %s", downloaded)
@@ -163,16 +165,25 @@ def run_category_job():
     path = _latest_category_file()
     if not path:
         log.warning("No category file found in %s", CATEGORY_DIR)
-        return
-
+        return None
     try:
-        rows = parse_category_file(path)
+        return parse_category_file(path)
     except Exception as exc:
         log.error("Failed to parse category file %s: %s", path, exc)
+        return None
+
+
+def run_category_job():
+    log.info("Category performance job started")
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    key = f"category_{yesterday}"
+    if alert_sent(key):
+        log.info("Category summary already sent for %s", yesterday)
         return
 
+    rows = _fetch_category_rows(yesterday)
     if not rows:
-        log.warning("Category file %s produced no rows", path)
+        log.warning("No category rows for %s — aborting", yesterday)
         return
 
     upsert_category_rows(yesterday, rows)
