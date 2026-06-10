@@ -55,16 +55,18 @@ Table: daily_dashboard  — one row per report_date (from morning dashboard emai
 
 Table: category_performance  — one row per (report_date, category leaf) from the daily Tableau export
   report_date  TEXT  YYYY-MM-DD
-  main_cat     TEXT  top-level category (Chinese), e.g. 超級市場, 護膚化妝, 大腦場
+  main_cat     TEXT  top-level category (Traditional Chinese), e.g. 水果 蔬菜 鮮花, 冷凍/急凍食品
   sub_cat1, sub_cat2, sub_cat3, sub_cat4  TEXT  sub-category levels (Chinese; '' if not applicable)
   leaf_cat     TEXT  the deepest non-empty category name for this row
-  level        INTEGER  depth of leaf (1=main … 5=sub_cat4)
+  level        INTEGER  depth of leaf (1=main … 4=sub_cat3; sub_cat4 is currently always '')
   gmv          REAL  gross merchandise value in HKD for this leaf category
-  gp           REAL  gross profit in HKD
-  gp_pct       REAL  gross profit margin as a fraction (0.05 = 5%), after rebate
+  gp           REAL  gross profit in HKD — NOT AVAILABLE: always 0 (the GMV source view has no GP column)
+  gp_pct       REAL  gross profit margin — NOT AVAILABLE: always 0
   Notes: each row is a distinct leaf — summing gmv across rows gives the total (no subtotal rows).
   To get main-category totals: SUM(gmv) GROUP BY main_cat.
   Category names are in Traditional Chinese — match user terms to these (e.g. "supermarket"=超級市場).
+  IMPORTANT: gp and gp_pct are always 0 — do NOT answer gross-profit or margin questions
+  from this table. If asked about category GP/margin, say it is not currently available.
 """
 
 _SYSTEM = [
