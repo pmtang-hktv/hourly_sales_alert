@@ -595,7 +595,17 @@ def _parse_category_gmv_csv(text: str) -> list[dict]:
 
         rows.append({**resolved, "leaf_cat": leaf, "level": level,
                      "gmv": gmv, "gp": 0.0, "gp_pct": 0.0})
-    return rows
+
+    # Deduplicate: different Sub Cat codes can share the same Chinese name.
+    # Aggregate by category key, summing GMV.
+    seen: dict = {}
+    for r in rows:
+        key = (r["main_cat"], r["sub_cat1"], r["sub_cat2"], r["sub_cat3"], r["sub_cat4"])
+        if key in seen:
+            seen[key]["gmv"] += r["gmv"]
+        else:
+            seen[key] = r
+    return list(seen.values())
 
 
 def download_category_gmv_rest(target_date=None) -> list[dict]:
