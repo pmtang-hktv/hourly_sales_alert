@@ -24,7 +24,7 @@ from src.bot_listener import start_bot_listener
 from src.category_analyzer import build_category_summary
 from src.category_parser import parse_category_file
 from src.config import CATEGORY_DIR, DB_PATH, TABLEAU_PAT2_NAME, TABLEAU_PAT2_SECRET
-from src.tableau_downloader import download_category_gmv_rest, download_category_performance, download_daily_sales_update
+from src.tableau_downloader import download_category_gmv_rest, download_category_performance, download_daily_sales_update, _parse_category_gmv_xlsx
 from src.daily_parser import parse_daily_dashboard
 from src.db import alert_sent, get_daily_dashboard, get_day_totals_upto_hour, get_hour_row, init_db, log_alert, upsert_category_rows, upsert_daily, upsert_daily_dashboard, upsert_hourly
 from src.fetcher import fetch_latest_email
@@ -170,7 +170,20 @@ def _fetch_category_rows(yesterday: str) -> list | None:
         log.warning("No category file found in %s", CATEGORY_DIR)
         return None
     try:
-        return parse_category_file(path)
+        # REST API saves crosstab xlsx; try that parser first (gives real GMV).
+        # Fall back to the Selenium/GPReport parser if it returns all zeros.
+        with open(path, "rb") as fh:
+            content = fh.read()
+        rows = _parse_category_gmv_xlsx(content)
+        if rows and any(r.get("gmv") for r in rows):
+            log.info("Parsed category file with REST parser: %d rows", len(rows))
+            return rows
+        rows = parse_category_file(path)
+        if rows and any(r.get("gmv") for r in rows):
+            log.info("Parsed category file with Selenium parser: %d rows", len(rows))
+            return rows
+        log.warning("Category file parsed but all GMV is zero: %s", path)
+        return None
     except Exception as exc:
         log.error("Failed to parse category file %s: %s", path, exc)
         return None
