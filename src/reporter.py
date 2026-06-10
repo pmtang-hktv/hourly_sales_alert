@@ -150,16 +150,21 @@ def format_category_summary(data: dict) -> str:
     total_gmv = data["total_gmv"]
     total_gp = data["total_gp"]
     gp_pct = data["total_gp_pct"] * 100
+    has_gp = data.get("has_gp", True)
 
     lines = [f"🗂️ <b>Category Performance — {rd}</b>", ""]
     lines.append(f"Total GMV: <b>HKD {total_gmv:,.0f}</b>")
-    lines.append(f"Total GP:  <b>HKD {total_gp:,.0f}</b> ({gp_pct:.1f}%)")
+    if has_gp:
+        lines.append(f"Total GP:  <b>HKD {total_gp:,.0f}</b> ({gp_pct:.1f}%)")
 
     # Top categories by GMV
     lines.append("\n<b>Top categories by GMV</b>")
     for c in data["top_categories"]:
         share = (c["gmv"] / total_gmv * 100) if total_gmv else 0
-        lines.append(f"  {c['main_cat']}: HKD {c['gmv']:,.0f} ({share:.0f}%, GP {c['gp_pct']*100:.0f}%)")
+        if has_gp:
+            lines.append(f"  {c['main_cat']}: HKD {c['gmv']:,.0f} ({share:.0f}%, GP {c['gp_pct']*100:.0f}%)")
+        else:
+            lines.append(f"  {c['main_cat']}: HKD {c['gmv']:,.0f} ({share:.0f}%)")
 
     # WoW movers
     if data["has_last_week"] and data["movers"]:
