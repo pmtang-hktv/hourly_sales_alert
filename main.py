@@ -10,7 +10,10 @@ Schedule:
 """
 from __future__ import annotations
 
+import fcntl
 import logging
+import os
+import sys
 from datetime import datetime, timedelta
 
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -20,7 +23,7 @@ from src.analyzer import build_fullday_summary, build_halfday_summary, check_ano
 from src.bot_listener import start_bot_listener
 from src.category_analyzer import build_category_summary
 from src.category_parser import parse_category_file
-from src.config import CATEGORY_DIR, TABLEAU_PAT2_NAME, TABLEAU_PAT2_SECRET
+from src.config import CATEGORY_DIR, DB_PATH, TABLEAU_PAT2_NAME, TABLEAU_PAT2_SECRET
 from src.tableau_downloader import download_category_gmv_rest, download_category_performance, download_daily_sales_update
 from src.daily_parser import parse_daily_dashboard
 from src.db import alert_sent, get_daily_dashboard, get_day_totals_upto_hour, get_hour_row, init_db, log_alert, upsert_category_rows, upsert_daily, upsert_daily_dashboard, upsert_hourly
@@ -194,7 +197,30 @@ def run_category_job():
         log.info("Sent category summary for %s (%d rows)", yesterday, len(rows))
 
 
+# Held for the process lifetime so the OS keeps the exclusive lock — do not let it GC.
+_LOCK_HANDLE = None
+
+
+def _acquire_singleton_lock():
+    """Ensure only one instance runs. Prevents duplicate Telegram pollers (which
+    cause the same question to be answered multiple times) and duplicate scheduled
+    sends. Exits if another instance already holds the lock."""
+    global _LOCK_HANDLE
+    lock_path = os.path.join(os.path.dirname(DB_PATH) or ".", ".sales_alert.lock")
+    os.makedirs(os.path.dirname(lock_path) or ".", exist_ok=True)
+    _LOCK_HANDLE = open(lock_path, "w")
+    try:
+        fcntl.flock(_LOCK_HANDLE, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        log.error("Another instance is already running (lock held: %s) — exiting", lock_path)
+        sys.exit(1)
+    _LOCK_HANDLE.write(str(os.getpid()))
+    _LOCK_HANDLE.flush()
+    log.info("Acquired single-instance lock (pid=%d): %s", os.getpid(), lock_path)
+
+
 if __name__ == "__main__":
+    _acquire_singleton_lock()
     init_db()
     start_bot_listener()
     scheduler = BlockingScheduler(timezone="Asia/Hong_Kong")
