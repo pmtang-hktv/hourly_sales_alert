@@ -176,6 +176,17 @@ def format_category_summary(data: dict) -> str:
     elif not data["has_last_week"]:
         lines.append("\n<i>(Week-over-week comparison available once 7+ days of data accumulate)</i>")
 
+    # Category anomalies vs same-weekday average
+    if data.get("anomalies"):
+        lines.append("\n⚡ <b>Category anomalies vs same-weekday avg</b>")
+        for a in data["anomalies"]:
+            icon = "📈" if a["direction"] == "high" else "📉"
+            sign = "+" if a["pct_diff"] > 0 else ""
+            lines.append(
+                f"  {icon} {a['main_cat']}: HKD {a['gmv']:,.0f}"
+                f" ({sign}{a['pct_diff']:.0f}% vs {a['weeks_compared']}wk avg HKD {a['mean']:,.0f})"
+            )
+
     # Low / negative margin flags
     if data["low_margin"]:
         lines.append("\n⚠️ <b>Low / negative GP margin flags</b>")
