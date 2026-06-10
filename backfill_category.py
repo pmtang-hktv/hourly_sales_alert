@@ -1,11 +1,16 @@
-"""Backfill historical Category Performance data from Tableau.
+"""Backfill historical Category Performance (GMV) data from Tableau.
 
 Usage:
   python3 backfill_category.py [DAYS]
 
   DAYS defaults to 5. Downloads the past DAYS days (ending yesterday),
-  parses each file, stores rows in the DB, and prints a summary.
-  Does NOT send Telegram messages.
+  stores rows in the DB, and prints a summary. Does NOT send Telegram messages.
+
+Strategy (auto-selected):
+  1. REST API via PAT2 (MonthlySalesbystore/bycat) — preferred, no browser needed.
+     Requires TABLEAU_PAT2_NAME + TABLEAU_PAT2_SECRET in .env.
+  2. Selenium (RMDashboard-GPReport) — fallback if PAT2 not configured.
+     Includes GP data but requires a browser + access key.
 """
 from __future__ import annotations
 
@@ -13,9 +18,13 @@ import logging
 import sys
 from datetime import datetime, timedelta
 
-from src.category_parser import parse_category_file
+from src.config import TABLEAU_PAT2_NAME, TABLEAU_PAT2_SECRET
 from src.db import init_db, upsert_category_rows
-from src.tableau_downloader import backfill_category_performance
+from src.tableau_downloader import (
+    backfill_category_gmv_rest,
+    backfill_category_performance,
+)
+from src.category_parser import parse_category_file
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,10 +41,40 @@ def main():
     log.info("Backfilling %d days: %s … %s", days, dates[-1], dates[0])
 
     init_db()
-    results = backfill_category_performance(dates)
 
-    print("\n===== Backfill summary =====")
+    use_rest = bool(TABLEAU_PAT2_NAME and TABLEAU_PAT2_SECRET)
+    if use_rest:
+        log.info("Using REST API (PAT2) — MonthlySalesbystore/bycat")
+        _run_rest(dates)
+    else:
+        log.info("PAT2 not configured — using Selenium fallback (RMDashboard-GPReport)")
+        _run_selenium(dates)
+
+
+def _run_rest(dates):
+    results = backfill_category_gmv_rest(dates)
     ok = 0
+    print("\n===== Backfill summary (REST/GMV) =====")
+    for d in dates:
+        iso = d.strftime("%Y-%m-%d")
+        rows = results.get(iso)
+        if not rows:
+            print(f"  {iso}: FAILED (no data)")
+            continue
+        try:
+            upsert_category_rows(iso, rows)
+            total_gmv = sum(r["gmv"] or 0 for r in rows)
+            print(f"  {iso}: {len(rows)} rows, total GMV HKD {total_gmv:,.0f}")
+            ok += 1
+        except Exception as exc:
+            print(f"  {iso}: store error — {exc}")
+    print(f"===== {ok}/{len(dates)} days stored =====")
+
+
+def _run_selenium(dates):
+    results = backfill_category_performance(dates)
+    ok = 0
+    print("\n===== Backfill summary (Selenium/GMV+GP) =====")
     for d in dates:
         iso = d.strftime("%Y-%m-%d")
         path = results.get(iso)

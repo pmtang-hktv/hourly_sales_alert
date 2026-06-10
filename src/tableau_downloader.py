@@ -34,7 +34,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
-from src.config import CATEGORY_DIR, DAILY_DIR, TABLEAU_ACCESS_KEY, TABLEAU_HEADLESS, TABLEAU_PAT_NAME, TABLEAU_PAT_SECRET, TABLEAU_PASSWORD, TABLEAU_SERVER, TABLEAU_USERNAME
+from src.config import CATEGORY_DIR, DAILY_DIR, TABLEAU_ACCESS_KEY, TABLEAU_HEADLESS, TABLEAU_PAT_NAME, TABLEAU_PAT_SECRET, TABLEAU_PAT2_NAME, TABLEAU_PAT2_SECRET, TABLEAU_PASSWORD, TABLEAU_SERVER, TABLEAU_USERNAME
 
 log = logging.getLogger(__name__)
 
@@ -44,6 +44,8 @@ _WORKBOOK = "RMDashboard-GPReport"
 _GP_OVERVIEW = "GPOverview"
 _DAILY_WORKBOOK = "DailySalesUpdate-BQSimplfied"
 _DAILY_SHEET = "DailySalesUpdate"
+_CAT_GMV_WORKBOOK = "MonthlySalesbystore"
+_CAT_GMV_VIEW = "bycat"
 
 
 
@@ -501,6 +503,181 @@ def backfill_category_performance(dates: list) -> dict:
     finally:
         if driver:
             driver.quit()
+
+
+# ── Category GMV (Tableau REST API, PAT2) ─────────────────────────────────────
+
+def _pat2_signin(base: str) -> tuple[str, str]:
+    resp = requests.post(
+        f"{base}/auth/signin",
+        json={"credentials": {
+            "personalAccessTokenName": TABLEAU_PAT2_NAME,
+            "personalAccessTokenSecret": TABLEAU_PAT2_SECRET,
+            "site": {"contentUrl": ""},
+        }},
+        headers={"content-type": "application/json", "accept": "application/json"},
+        timeout=30, verify=False,
+    )
+    resp.raise_for_status()
+    creds = resp.json()["credentials"]
+    return creds["token"], creds["site"]["id"]
+
+
+def _find_view_id(base: str, headers: dict, site_id: str,
+                  workbook_content_url: str, view_url_name: str) -> str:
+    resp = requests.get(
+        f"{base}/sites/{site_id}/workbooks",
+        headers=headers,
+        params={"filter": f"contentUrl:eq:{workbook_content_url}"},
+        timeout=30, verify=False,
+    )
+    resp.raise_for_status()
+    wbs = resp.json().get("workbooks", {}).get("workbook", [])
+    if not wbs:
+        raise RuntimeError(f"Workbook '{workbook_content_url}' not found (does PAT2 have access?)")
+    wb_id = wbs[0]["id"]
+
+    resp = requests.get(
+        f"{base}/sites/{site_id}/workbooks/{wb_id}/views",
+        headers=headers, timeout=30, verify=False,
+    )
+    resp.raise_for_status()
+    views = resp.json().get("views", {}).get("view", [])
+    view = next((v for v in views if v.get("viewUrlName") == view_url_name), None)
+    if not view:
+        raise RuntimeError(f"View '{view_url_name}' not found in workbook '{workbook_content_url}'")
+    return view["id"]
+
+
+def _parse_category_gmv_csv(text: str) -> list[dict]:
+    """Parse the CSV from MonthlySalesbystore/bycat into category rows.
+
+    Keeps only GMV rows with Month=='All' and at least one non-empty category code.
+    Maps Sub Cat 1-4 Chinese names → main_cat, sub_cat1, sub_cat2, sub_cat3.
+    gp / gp_pct are 0 (not available in this view).
+    """
+    import csv, io
+
+    rows: list[dict] = []
+    reader = csv.DictReader(io.StringIO(text))
+    for row in reader:
+        if row.get("Measure Names") != "GMV":
+            continue
+        if row.get("Month of Order Date (day)") != "All":
+            continue
+
+        c1 = (row.get("Primary Sub Cat 1 Code") or "").strip()
+        c2 = (row.get("Primary Sub Cat 2 Code") or "").strip()
+        c3 = (row.get("Primary Sub Cat 3 Code") or "").strip()
+        c4 = (row.get("Primary Sub Cat 4 Code") or "").strip()
+        if not any([c1, c2, c3, c4]):
+            continue  # grand total row — skip
+
+        n1 = (row.get("sub_cat_1_name_chi") or "").strip()
+        n2 = (row.get("sub_cat_2_name_chi") or "").strip()
+        n3 = (row.get("sub_cat_3_name_chi") or "").strip()
+        n4 = (row.get("sub_cat_4_name_chi") or "").strip()
+
+        db_keys = ["main_cat", "sub_cat1", "sub_cat2", "sub_cat3", "sub_cat4"]
+        cats = [n1, n2, n3, n4, ""]
+        resolved = dict(zip(db_keys, cats))
+
+        leaf, level = "", 0
+        for i, k in enumerate(db_keys):
+            if resolved[k]:
+                leaf = resolved[k]
+                level = i + 1
+
+        try:
+            gmv = float(row.get("Measure Values") or 0)
+        except (ValueError, TypeError):
+            gmv = 0.0
+
+        rows.append({**resolved, "leaf_cat": leaf, "level": level,
+                     "gmv": gmv, "gp": 0.0, "gp_pct": 0.0})
+    return rows
+
+
+def download_category_gmv_rest(target_date=None) -> list[dict]:
+    """Download GMV by category from MonthlySalesbystore/bycat via REST API (PAT2).
+
+    Returns list of dicts matching upsert_category_rows schema.
+    Falls back silently to [] if PAT2 not configured or request fails.
+    """
+    if not all([TABLEAU_SERVER, TABLEAU_PAT2_NAME, TABLEAU_PAT2_SECRET]):
+        log.warning("TABLEAU_PAT2 credentials not configured — skipping REST category download")
+        return []
+
+    if target_date is None:
+        target_date = (datetime.now() - timedelta(days=1)).date()
+    date_str = target_date.strftime("%Y-%m-%d")
+    base = f"{TABLEAU_SERVER}/api/{_API_VERSION}"
+
+    try:
+        token, site_id = _pat2_signin(base)
+        headers = {"x-tableau-auth": token, "accept": "application/json"}
+        log.info("PAT2 signed in for category GMV download")
+
+        view_id = _find_view_id(base, headers, site_id, _CAT_GMV_WORKBOOK, _CAT_GMV_VIEW)
+
+        resp = requests.get(
+            f"{base}/sites/{site_id}/views/{view_id}/data",
+            headers=headers,
+            params={"vf_Order Date (day)": date_str},
+            timeout=120, verify=False,
+        )
+        resp.raise_for_status()
+
+        rows = _parse_category_gmv_csv(resp.text)
+        log.info("Category GMV REST: %d rows for %s", len(rows), date_str)
+
+        requests.post(f"{base}/auth/signout", headers=headers, timeout=10, verify=False)
+        return rows
+
+    except Exception as exc:
+        log.error("Category GMV REST download failed for %s: %s", date_str, exc, exc_info=True)
+        return []
+
+
+def backfill_category_gmv_rest(dates: list) -> dict:
+    """Download category GMV via REST API for each date. Returns {iso_date: row_list}."""
+    if not all([TABLEAU_SERVER, TABLEAU_PAT2_NAME, TABLEAU_PAT2_SECRET]):
+        log.warning("TABLEAU_PAT2 credentials not configured — skipping REST backfill")
+        return {}
+
+    base = f"{TABLEAU_SERVER}/api/{_API_VERSION}"
+    results: dict = {}
+
+    try:
+        token, site_id = _pat2_signin(base)
+        headers = {"x-tableau-auth": token, "accept": "application/json"}
+        log.info("PAT2 signed in — starting REST category GMV backfill (%d dates)", len(dates))
+
+        view_id = _find_view_id(base, headers, site_id, _CAT_GMV_WORKBOOK, _CAT_GMV_VIEW)
+
+        for d in dates:
+            iso = d.strftime("%Y-%m-%d")
+            try:
+                resp = requests.get(
+                    f"{base}/sites/{site_id}/views/{view_id}/data",
+                    headers=headers,
+                    params={"vf_Order Date (day)": iso},
+                    timeout=120, verify=False,
+                )
+                resp.raise_for_status()
+                rows = _parse_category_gmv_csv(resp.text)
+                log.info("  %s: %d rows", iso, len(rows))
+                results[iso] = rows
+            except Exception as exc:
+                log.error("  %s failed: %s", iso, exc)
+                results[iso] = None
+
+        requests.post(f"{base}/auth/signout", headers=headers, timeout=10, verify=False)
+
+    except Exception as exc:
+        log.error("REST backfill session failed: %s", exc, exc_info=True)
+
+    return results
 
 
 # ── Daily Sales Update (Tableau REST API) ─────────────────────────────────────
