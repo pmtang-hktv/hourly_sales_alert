@@ -139,7 +139,7 @@ def answer_question(question: str) -> str:
         {"role": "user", "content": f"Today: {today}\n\nQuestion: {question}"}
     ]
 
-    for _ in range(5):  # max 5 tool-call rounds
+    for _ in range(10):  # max 10 tool-call rounds
         response = client.messages.create(
             model="claude-sonnet-4-6",
             max_tokens=1024,
