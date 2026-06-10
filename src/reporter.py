@@ -257,3 +257,40 @@ def format_daily_dashboard_summary(row: dict, report_date: str) -> str:
         lines.append(f"Yesterday: {pct(sd_pct)}  /  MTD: {pct(row.get('sameday_mtd_pct'))}")
 
     return "\n".join(lines)
+
+
+def format_store_summary(data: dict) -> str:
+    rd = _fmt_date(data["report_date"])
+    weekday = data["weekday_name"]
+    total_gmv  = data["total_gmv"]
+    lw_gmv     = data["lw_total_gmv"]
+
+    lines = [f"🏪 <b>Store Performance — {weekday} {rd}</b>", ""]
+    lines.append(f"Total GMV:     <b>HKD {total_gmv:,.0f}</b>")
+    lines.append(f"Active Stores: <b>{data['total_stores']:,}</b>")
+    lines.append(f"Total Orders:  <b>{data['total_orders']:,}</b>")
+    lines.append(f"Customers:     <b>{data['total_customers']:,}</b>")
+
+    if data["has_last_week"] and lw_gmv:
+        icon, diff = _compare(total_gmv, lw_gmv)
+        lines.append(f"\n{icon} vs last {weekday}: HKD {lw_gmv:,.0f} ({diff})")
+
+    lines.append("\n<b>Top stores by GMV</b>")
+    for s in data["top_stores"]:
+        rm = f" [{s['rm_name']}]" if s.get("rm_name") else ""
+        lines.append(
+            f"  {s['store_name']}{rm}: HKD {s['gmv']:,.0f} ({s['orders']:,} orders)"
+        )
+
+    if data.get("anomalies"):
+        lines.append("\n⚡ <b>Store anomalies vs same-weekday avg</b>")
+        for a in data["anomalies"]:
+            icon = "📈" if a["direction"] == "high" else "📉"
+            sign = "+" if a["pct_diff"] > 0 else ""
+            rm = f" [{a['rm_name']}]" if a.get("rm_name") else ""
+            lines.append(
+                f"  {icon} {a['store_name']}{rm}: HKD {a['gmv']:,.0f}"
+                f" ({sign}{a['pct_diff']:.0f}% vs {a['weeks_compared']}wk avg HKD {a['mean']:,.0f})"
+            )
+
+    return "\n".join(lines)

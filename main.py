@@ -6,6 +6,7 @@ Schedule:
   12:10                — also send half-day summary (00:00–12:00)
   00:10                — also send full-day summary for previous day
   15:00                — parse latest category performance xlsx, send summary
+  15:30                — download store performance by RM by category, send summary
   08:15                — download Daily Sales Update PDF from Tableau, parse, send summary
 """
 from __future__ import annotations
@@ -24,13 +25,14 @@ from src.bot_listener import start_bot_listener
 from src.category_analyzer import build_category_summary
 from src.category_parser import parse_category_file
 from src.config import CATEGORY_DIR, DB_PATH, TABLEAU_PAT2_NAME, TABLEAU_PAT2_SECRET
-from src.tableau_downloader import download_category_gmv_rest, download_category_performance, download_daily_sales_update, _parse_category_gmv_xlsx
+from src.tableau_downloader import download_category_gmv_rest, download_category_performance, download_daily_sales_update, download_store_gmv_rest, _parse_category_gmv_xlsx
 from src.daily_parser import parse_daily_dashboard
-from src.db import alert_sent, get_daily_dashboard, get_day_totals_upto_hour, get_hour_row, init_db, log_alert, upsert_category_rows, upsert_daily, upsert_daily_dashboard, upsert_hourly
+from src.db import alert_sent, get_daily_dashboard, get_day_totals_upto_hour, get_hour_row, init_db, log_alert, upsert_category_rows, upsert_daily, upsert_daily_dashboard, upsert_hourly, upsert_store_rows
 from src.fetcher import fetch_latest_email
 from src.notifier import send_telegram
 from src.parser import parse_email
-from src.reporter import format_anomaly_alert, format_category_summary, format_daily_dashboard_summary, format_fullday_summary, format_halfday_summary
+from src.reporter import format_anomaly_alert, format_category_summary, format_daily_dashboard_summary, format_fullday_summary, format_halfday_summary, format_store_summary
+from src.store_analyzer import build_store_summary
 
 logging.basicConfig(
     level=logging.INFO,
@@ -210,6 +212,27 @@ def run_category_job():
         log.info("Sent category summary for %s (%d rows)", yesterday, len(rows))
 
 
+def run_store_job():
+    log.info("Store performance job started")
+    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
+    key = f"store_{yesterday}"
+    if alert_sent(key):
+        log.info("Store summary already sent for %s", yesterday)
+        return
+
+    rows = download_store_gmv_rest()
+    if not rows or not any(r.get("gmv") for r in rows):
+        log.warning("No store rows with GMV for %s — aborting", yesterday)
+        return
+
+    upsert_store_rows(yesterday, rows)
+    data = build_store_summary(yesterday)
+    msg = format_store_summary(data)
+    if send_telegram(msg):
+        log_alert(key, msg)
+        log.info("Sent store summary for %s (%d store-category rows)", yesterday, len(rows))
+
+
 # Held for the process lifetime so the OS keeps the exclusive lock — do not let it GC.
 _LOCK_HANDLE = None
 
@@ -268,10 +291,12 @@ if __name__ == "__main__":
     scheduler = BlockingScheduler(timezone="Asia/Hong_Kong")
     scheduler.add_job(run_hourly_job, CronTrigger(minute=10), id="hourly_job")
     scheduler.add_job(run_category_job, CronTrigger(hour=15, minute=0), id="category_job")
+    scheduler.add_job(run_store_job, CronTrigger(hour=15, minute=30), id="store_job")
     scheduler.add_job(run_daily_dashboard_job, CronTrigger(hour=8, minute=15), id="daily_dashboard_job")
     log.info("Scheduler started — running at :10 past every hour (HKT)")
     log.info("Daily dashboard job scheduled at 08:15 HKT (Tableau PDF)")
     log.info("Category performance job scheduled at 15:00 HKT")
+    log.info("Store performance job scheduled at 15:30 HKT")
     log.info("Telegram bot listener running — send any question to your bot")
     try:
         scheduler.start()

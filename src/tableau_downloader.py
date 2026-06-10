@@ -34,7 +34,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
-from src.config import CATEGORY_DIR, DAILY_DIR, TABLEAU_ACCESS_KEY, TABLEAU_HEADLESS, TABLEAU_PAT_NAME, TABLEAU_PAT_SECRET, TABLEAU_PAT2_NAME, TABLEAU_PAT2_SECRET, TABLEAU_PASSWORD, TABLEAU_SERVER, TABLEAU_USERNAME
+from src.config import CATEGORY_DIR, DAILY_DIR, STORE_DIR, TABLEAU_ACCESS_KEY, TABLEAU_HEADLESS, TABLEAU_PAT_NAME, TABLEAU_PAT_SECRET, TABLEAU_PAT2_NAME, TABLEAU_PAT2_SECRET, TABLEAU_PASSWORD, TABLEAU_SERVER, TABLEAU_USERNAME
 
 log = logging.getLogger(__name__)
 
@@ -44,8 +44,9 @@ _WORKBOOK = "RMDashboard-GPReport"
 _GP_OVERVIEW = "GPOverview"
 _DAILY_WORKBOOK = "DailySalesUpdate-BQSimplfied"
 _DAILY_SHEET = "DailySalesUpdate"
-_CAT_GMV_WORKBOOK = "MonthlySalesbystore"
-_CAT_GMV_VIEW = "bycat"
+_CAT_GMV_WORKBOOK  = "MonthlySalesbystore"
+_CAT_GMV_VIEW      = "bycat"
+_STORE_GMV_VIEW    = "bystorebymaincat"
 
 
 
@@ -712,6 +713,168 @@ def backfill_category_gmv_rest(dates: list) -> dict:
 
     except Exception as exc:
         log.error("REST backfill session failed: %s", exc, exc_info=True)
+
+    return results
+
+
+# ── Store Performance by RM by Category (Tableau REST API, PAT2) ─────────────
+
+def _parse_store_gmv_xlsx(content: bytes) -> list[dict]:
+    """Parse the crosstab xlsx from MonthlySalesbystore/bystorebymaincat.
+
+    Columns: Team_Head(0), RM_Code(1), RM_Name(2), Store_Code(3), Store_Name(4),
+    main_cat(5), Consignment_SKU(6), SKU#(7), 3PL_SKU#(8), GMV(9), Cust#(10), Orders(11).
+    Merged cells in cols 0–4 → forward-fill. Skip Grand Total row. Dedup by
+    (store_code, main_cat) summing GMV/customers/orders.
+    """
+    import io
+    import openpyxl
+
+    wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+    ws = wb.worksheets[0]
+
+    last: dict = {c: "" for c in range(5)}
+    rows: list[dict] = []
+
+    for r in range(2, ws.max_row + 1):   # row 1 is header
+        col0 = ws.cell(r, 1).value
+        if col0 == "Grand Total":
+            continue
+
+        vals = []
+        for c in range(5):
+            v = ws.cell(r, c + 1).value
+            if v is None:
+                v = last[c]
+            else:
+                last[c] = v
+            vals.append((v or "").strip() if isinstance(v, str) else (v or ""))
+
+        team_head, rm_code, rm_name, store_code, store_name = vals
+        main_cat = (ws.cell(r, 6).value or "").strip()
+        gmv      = ws.cell(r, 10).value
+        cust     = ws.cell(r, 11).value
+        orders   = ws.cell(r, 12).value
+
+        gmv    = float(gmv)    if isinstance(gmv,    (int, float)) else 0.0
+        cust   = int(cust)     if isinstance(cust,   (int, float)) else 0
+        orders = int(orders)   if isinstance(orders, (int, float)) else 0
+
+        rows.append({
+            "rm_code":    str(rm_code).strip(),
+            "rm_name":    str(rm_name).strip(),
+            "store_code": str(store_code).strip(),
+            "store_name": str(store_name).strip(),
+            "main_cat":   main_cat,
+            "gmv":        gmv,
+            "customers":  cust,
+            "orders":     orders,
+        })
+
+    # Deduplicate: same (store_code, main_cat) may appear with different internal codes.
+    seen: dict = {}
+    for r in rows:
+        key = (r["store_code"], r["main_cat"])
+        if key in seen:
+            seen[key]["gmv"]       += r["gmv"]
+            seen[key]["customers"] += r["customers"]
+            seen[key]["orders"]    += r["orders"]
+        else:
+            seen[key] = r
+    return list(seen.values())
+
+
+def _save_store_xlsx(content: bytes, date_str: str) -> str:
+    """Write the downloaded store crosstab xlsx to STORE_DIR for auditing."""
+    os.makedirs(STORE_DIR, exist_ok=True)
+    path = os.path.join(STORE_DIR, f"store_performance_{date_str}.xlsx")
+    with open(path, "wb") as f:
+        f.write(content)
+    return path
+
+
+def download_store_gmv_rest(target_date=None) -> list[dict]:
+    """Download GMV by store × main-category from MonthlySalesbystore/bystorebymaincat.
+
+    Returns list of dicts matching upsert_store_rows schema.
+    Falls back silently to [] if PAT2 not configured or request fails.
+    """
+    if not all([TABLEAU_SERVER, TABLEAU_PAT2_NAME, TABLEAU_PAT2_SECRET]):
+        log.warning("TABLEAU_PAT2 credentials not configured — skipping REST store download")
+        return []
+
+    if target_date is None:
+        target_date = (datetime.now() - timedelta(days=1)).date()
+    date_str = target_date.strftime("%Y-%m-%d")
+    base = f"{TABLEAU_SERVER}/api/{_API_VERSION}"
+
+    try:
+        token, site_id = _pat2_signin(base)
+        headers = {"x-tableau-auth": token, "accept": "application/json"}
+
+        view_id = _find_view_id(base, headers, site_id, _CAT_GMV_WORKBOOK, _STORE_GMV_VIEW)
+        resp = requests.get(
+            f"{base}/sites/{site_id}/views/{view_id}/crosstab/excel",
+            headers=headers,
+            params={"vf_Order Date (day)": date_str},
+            timeout=180, verify=False,
+        )
+        resp.raise_for_status()
+        content = resp.content
+        saved = _save_store_xlsx(content, date_str)
+        rows = _parse_store_gmv_xlsx(content)
+        total = sum(r["gmv"] for r in rows)
+        log.info("Store GMV REST: %d rows, total GMV %s for %s (saved %s)",
+                 len(rows), f"{total:,.0f}", date_str, saved)
+
+        requests.post(f"{base}/auth/signout", headers=headers, timeout=10, verify=False)
+        return rows
+
+    except Exception as exc:
+        log.error("Store GMV REST download failed for %s: %s", date_str, exc, exc_info=True)
+        return []
+
+
+def backfill_store_gmv_rest(dates: list) -> dict:
+    """Download store × category GMV via REST API for each date. Returns {iso_date: rows_or_None}."""
+    if not all([TABLEAU_SERVER, TABLEAU_PAT2_NAME, TABLEAU_PAT2_SECRET]):
+        log.warning("TABLEAU_PAT2 credentials not configured — skipping REST store backfill")
+        return {}
+
+    base = f"{TABLEAU_SERVER}/api/{_API_VERSION}"
+    results: dict = {}
+
+    try:
+        token, site_id = _pat2_signin(base)
+        headers = {"x-tableau-auth": token, "accept": "application/json"}
+        log.info("PAT2 signed in — starting REST store GMV backfill (%d dates)", len(dates))
+
+        view_id = _find_view_id(base, headers, site_id, _CAT_GMV_WORKBOOK, _STORE_GMV_VIEW)
+
+        for d in dates:
+            iso = d.strftime("%Y-%m-%d")
+            try:
+                resp = requests.get(
+                    f"{base}/sites/{site_id}/views/{view_id}/crosstab/excel",
+                    headers=headers,
+                    params={"vf_Order Date (day)": iso},
+                    timeout=180, verify=False,
+                )
+                resp.raise_for_status()
+                content = resp.content
+                _save_store_xlsx(content, iso)
+                rows = _parse_store_gmv_xlsx(content)
+                total = sum(r["gmv"] for r in rows)
+                log.info("  %s: %d rows, total GMV %s", iso, len(rows), f"{total:,.0f}")
+                results[iso] = rows
+            except Exception as exc:
+                log.error("  %s failed: %s", iso, exc)
+                results[iso] = None
+
+        requests.post(f"{base}/auth/signout", headers=headers, timeout=10, verify=False)
+
+    except Exception as exc:
+        log.error("REST store backfill session failed: %s", exc, exc_info=True)
 
     return results
 

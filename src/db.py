@@ -117,6 +117,24 @@ CREATE TABLE IF NOT EXISTS category_performance (
 CREATE INDEX IF NOT EXISTS idx_cat_date ON category_performance(report_date);
 CREATE INDEX IF NOT EXISTS idx_cat_main ON category_performance(main_cat);
 
+CREATE TABLE IF NOT EXISTS store_performance (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    report_date TEXT NOT NULL,
+    rm_code     TEXT,
+    rm_name     TEXT,
+    store_code  TEXT NOT NULL,
+    store_name  TEXT,
+    main_cat    TEXT,
+    gmv         REAL,
+    customers   INTEGER,
+    orders      INTEGER,
+    created_at  TEXT DEFAULT (datetime('now')),
+    UNIQUE(report_date, store_code, main_cat)
+);
+
+CREATE INDEX IF NOT EXISTS idx_store_date ON store_performance(report_date);
+CREATE INDEX IF NOT EXISTS idx_store_rm   ON store_performance(rm_code);
+
 CREATE TABLE IF NOT EXISTS alerts_log (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     alert_key  TEXT NOT NULL UNIQUE,
@@ -328,6 +346,45 @@ def get_category_low_margin(report_date: str, min_gmv: float = 5000, max_gp_pct:
 
 def get_category_dates() -> list[str]:
     sql = "SELECT DISTINCT report_date FROM category_performance ORDER BY report_date DESC"
+    with get_conn() as conn:
+        return [r[0] for r in conn.execute(sql).fetchall()]
+
+
+def upsert_store_rows(report_date: str, rows: list[dict]):
+    """Replace all store rows for a date, then bulk-insert the new set."""
+    with get_conn() as conn:
+        conn.execute("DELETE FROM store_performance WHERE report_date = ?", (report_date,))
+        conn.executemany(
+            """INSERT INTO store_performance
+               (report_date, rm_code, rm_name, store_code, store_name, main_cat,
+                gmv, customers, orders)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                (report_date, r["rm_code"], r["rm_name"], r["store_code"],
+                 r["store_name"], r["main_cat"], r["gmv"], r["customers"], r["orders"])
+                for r in rows
+            ],
+        )
+
+
+def get_store_totals(report_date: str) -> list[dict]:
+    """Total GMV/customers/orders per store for a given date, ordered by GMV DESC."""
+    sql = """
+        SELECT store_code, store_name, rm_code, rm_name,
+               SUM(gmv)       AS gmv,
+               SUM(customers) AS customers,
+               SUM(orders)    AS orders
+        FROM store_performance
+        WHERE report_date = ?
+        GROUP BY store_code
+        ORDER BY gmv DESC
+    """
+    with get_conn() as conn:
+        return [dict(r) for r in conn.execute(sql, (report_date,)).fetchall()]
+
+
+def get_store_dates() -> list[str]:
+    sql = "SELECT DISTINCT report_date FROM store_performance ORDER BY report_date DESC"
     with get_conn() as conn:
         return [r[0] for r in conn.execute(sql).fetchall()]
 
