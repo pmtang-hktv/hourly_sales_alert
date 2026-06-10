@@ -201,6 +201,34 @@ def run_category_job():
 _LOCK_HANDLE = None
 
 
+def _kill_stale_siblings():
+    """Kill any other processes running this same script before we start.
+
+    Handles the case where manually-launched `nohup python3 main.py` instances
+    were started before the singleton lock existed and are still lingering alongside
+    the launchd-managed instance. The lock alone cannot stop processes that predate
+    it — we must terminate them explicitly at startup.
+    """
+    import signal
+    import subprocess
+    current_pid = os.getpid()
+    script_marker = "hourly_sales_alert/main.py"
+    try:
+        result = subprocess.run(["pgrep", "-f", script_marker], capture_output=True, text=True)
+        stale = [int(p) for p in result.stdout.split() if int(p) != current_pid]
+        for pid in stale:
+            log.warning("Terminating stale sibling instance (pid=%d)", pid)
+            try:
+                os.kill(pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+        if stale:
+            import time
+            time.sleep(1)
+    except Exception as exc:
+        log.warning("Could not scan for stale siblings: %s", exc)
+
+
 def _acquire_singleton_lock():
     """Ensure only one instance runs. Prevents duplicate Telegram pollers (which
     cause the same question to be answered multiple times) and duplicate scheduled
@@ -220,6 +248,7 @@ def _acquire_singleton_lock():
 
 
 if __name__ == "__main__":
+    _kill_stale_siblings()
     _acquire_singleton_lock()
     init_db()
     start_bot_listener()
