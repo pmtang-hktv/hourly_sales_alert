@@ -154,10 +154,10 @@ def _fetch_category_rows(yesterday: str) -> list | None:
     not configured or the REST call returns nothing."""
     if TABLEAU_PAT2_NAME and TABLEAU_PAT2_SECRET:
         rows = download_category_gmv_rest()
-        if rows:
+        if rows and any(r.get("gmv") for r in rows):
             log.info("Category rows via REST API: %d", len(rows))
             return rows
-        log.warning("REST category download returned no rows — falling back to Selenium")
+        log.warning("REST category download returned no rows or all-zero GMV — falling back to local file/Selenium")
 
     downloaded = download_category_performance()
     if downloaded:
