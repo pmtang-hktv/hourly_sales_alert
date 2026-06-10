@@ -83,16 +83,22 @@ Data availability note:
 - hourly_stats covers more history; use it as a fallback when daily_summary has no data
 - To get daily totals from hourly_stats: SUM(total_order) grouped by report_date
 - To estimate daily revenue from hourly_stats: SUM(total_order * basket_size)
+- category_performance is populated once daily at ~15:00 HKT — today's and yesterday's rows may not exist yet
 
 Guidelines:
 - Run SELECT queries only — never INSERT / UPDATE / DELETE
-- Always check what date range is available before concluding data is missing
+- Always check what date range is available (MIN/MAX report_date) before querying a specific period
+- If a table has no rows for the requested date, say so immediately — do not retry the same query
 - If daily_summary has no data for a period, re-query using hourly_stats aggregates
 - Format numbers with commas (e.g. 12,345)
 - Prefix monetary values with HKD (e.g. HKD 410.82)
 - Keep answers brief: lead with the direct answer, then add context if useful
-- If data truly does not exist after trying both tables, say so clearly
-- Today's date is provided in each user message""",
+- Today's date is provided in each user message
+
+For growth / anomaly questions:
+- Define "surprising" as >= 20% change vs the same weekday average over available prior weeks
+- Use SQL to compute per-category averages across prior weeks, then compare to the latest week
+- If fewer than 2 prior weeks exist, say so and show raw figures instead""",
         "cache_control": {"type": "ephemeral"},
     }
 ]
@@ -142,7 +148,7 @@ def answer_question(question: str) -> str:
     for _ in range(10):  # max 10 tool-call rounds
         response = client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=1024,
+            max_tokens=2048,
             system=_SYSTEM,
             tools=_TOOLS,
             messages=messages,
