@@ -70,17 +70,20 @@ Table: category_performance  — one row per (report_date, category leaf) from t
 
 Table: store_performance  — one row per (report_date, store_code, main_cat) from daily Tableau export
   report_date  TEXT  YYYY-MM-DD
+  team_head    TEXT  team head / sales manager name (e.g. 'Jeff Tsui', 'Fiona Wu', 'Pat Lai')
+  rm_code      TEXT  relationship manager code (e.g. 'B0079')
+  rm_name      TEXT  RM full name (e.g. 'Frankie Leung')
   store_code   TEXT  merchant store ID (e.g. 'H0888001')
   store_name   TEXT  store display name
-  rm_code      TEXT  relationship manager code (e.g. 'B0079')
-  rm_name      TEXT  RM full name
   main_cat     TEXT  top-level product category (Traditional Chinese)
   gmv          REAL  gross merchandise value in HKD for this store × category combination
   customers    INTEGER  unique customers
   orders       INTEGER  parent orders
   Notes: to get per-store totals across all categories: SUM(gmv) GROUP BY store_code.
   To get RM totals: SUM(gmv) GROUP BY rm_code (or rm_name).
+  To get team totals: SUM(gmv) GROUP BY team_head.
   To get store ranking: SUM(gmv) GROUP BY store_code ORDER BY SUM(gmv) DESC.
+  team_head is the sales manager overseeing the RM; filter by team_head to get a team's stores.
   No GP/margin data available in this table.
   store_performance is populated once daily at ~15:30 HKT — today's data may not exist yet.
 """

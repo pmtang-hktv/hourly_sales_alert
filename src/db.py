@@ -120,6 +120,7 @@ CREATE INDEX IF NOT EXISTS idx_cat_main ON category_performance(main_cat);
 CREATE TABLE IF NOT EXISTS store_performance (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     report_date TEXT NOT NULL,
+    team_head   TEXT,
     rm_code     TEXT,
     rm_name     TEXT,
     store_code  TEXT NOT NULL,
@@ -158,6 +159,16 @@ def get_conn():
 def init_db():
     with get_conn() as conn:
         conn.executescript(SCHEMA)
+    # Migrations: add columns/indexes missing from older DB instances
+    with get_conn() as conn:
+        for sql in [
+            "ALTER TABLE store_performance ADD COLUMN team_head TEXT",
+            "CREATE INDEX IF NOT EXISTS idx_store_teamhead ON store_performance(team_head)",
+        ]:
+            try:
+                conn.execute(sql)
+            except Exception:
+                pass  # column/index already exists
 
 
 def upsert_hourly(row: dict):
@@ -356,11 +367,11 @@ def upsert_store_rows(report_date: str, rows: list[dict]):
         conn.execute("DELETE FROM store_performance WHERE report_date = ?", (report_date,))
         conn.executemany(
             """INSERT INTO store_performance
-               (report_date, rm_code, rm_name, store_code, store_name, main_cat,
+               (report_date, team_head, rm_code, rm_name, store_code, store_name, main_cat,
                 gmv, customers, orders)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             [
-                (report_date, r["rm_code"], r["rm_name"], r["store_code"],
+                (report_date, r.get("team_head"), r["rm_code"], r["rm_name"], r["store_code"],
                  r["store_name"], r["main_cat"], r["gmv"], r["customers"], r["orders"])
                 for r in rows
             ],
@@ -370,7 +381,7 @@ def upsert_store_rows(report_date: str, rows: list[dict]):
 def get_store_totals(report_date: str) -> list[dict]:
     """Total GMV/customers/orders per store for a given date, ordered by GMV DESC."""
     sql = """
-        SELECT store_code, store_name, rm_code, rm_name,
+        SELECT store_code, store_name, team_head, rm_code, rm_name,
                SUM(gmv)       AS gmv,
                SUM(customers) AS customers,
                SUM(orders)    AS orders

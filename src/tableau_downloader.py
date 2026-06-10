@@ -761,6 +761,7 @@ def _parse_store_gmv_xlsx(content: bytes) -> list[dict]:
         orders = int(orders)   if isinstance(orders, (int, float)) else 0
 
         rows.append({
+            "team_head":  str(team_head).strip() if team_head else "",
             "rm_code":    str(rm_code).strip(),
             "rm_name":    str(rm_name).strip(),
             "store_code": str(store_code).strip(),
@@ -779,6 +780,9 @@ def _parse_store_gmv_xlsx(content: bytes) -> list[dict]:
             seen[key]["gmv"]       += r["gmv"]
             seen[key]["customers"] += r["customers"]
             seen[key]["orders"]    += r["orders"]
+            # prefer non-empty team_head
+            if not seen[key]["team_head"] and r["team_head"]:
+                seen[key]["team_head"] = r["team_head"]
         else:
             seen[key] = r
     return list(seen.values())
