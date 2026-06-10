@@ -32,3 +32,6 @@ TABLEAU_ACCESS_KEY = os.getenv("TABLEAU_ACCESS_KEY", "")
 TABLEAU_HEADLESS = os.getenv("TABLEAU_HEADLESS", "true").lower() not in ("false", "0", "no")
 TABLEAU_PAT_NAME = os.getenv("TABLEAU_PAT_NAME", "")
 TABLEAU_PAT_SECRET = os.getenv("TABLEAU_PAT_SECRET", "")
+# Second PAT account (broader access) — used for Category Performance GMV via REST API
+TABLEAU_PAT2_NAME = os.getenv("TABLEAU_PAT2_NAME", "")
+TABLEAU_PAT2_SECRET = os.getenv("TABLEAU_PAT2_SECRET", "")
