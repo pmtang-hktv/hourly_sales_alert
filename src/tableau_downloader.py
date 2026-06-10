@@ -816,7 +816,7 @@ def download_store_gmv_rest(target_date=None) -> list[dict]:
         resp = requests.get(
             f"{base}/sites/{site_id}/views/{view_id}/crosstab/excel",
             headers=headers,
-            params={"vf_Order Date (day)": date_str},
+            params={"vf_Order Date (day)": date_str, "vf_Virtual Store / Store": ""},
             timeout=180, verify=False,
         )
         resp.raise_for_status()
@@ -857,7 +857,7 @@ def backfill_store_gmv_rest(dates: list) -> dict:
                 resp = requests.get(
                     f"{base}/sites/{site_id}/views/{view_id}/crosstab/excel",
                     headers=headers,
-                    params={"vf_Order Date (day)": iso},
+                    params={"vf_Order Date (day)": iso, "vf_Virtual Store / Store": ""},
                     timeout=180, verify=False,
                 )
                 resp.raise_for_status()
