@@ -259,11 +259,15 @@ def format_daily_dashboard_summary(row: dict, report_date: str) -> str:
     return "\n".join(lines)
 
 
+def _trunc(s: str, n: int = 18) -> str:
+    return s if len(s) <= n else s[:n - 1] + "…"
+
+
 def format_store_summary(data: dict) -> str:
     rd = _fmt_date(data["report_date"])
     weekday = data["weekday_name"]
-    total_gmv  = data["total_gmv"]
-    lw_gmv     = data["lw_total_gmv"]
+    total_gmv = data["total_gmv"]
+    lw_gmv    = data["lw_total_gmv"]
 
     lines = [f"🏪 <b>Store Performance — {weekday} {rd}</b>", ""]
     lines.append(f"Total GMV:     <b>HKD {total_gmv:,.0f}</b>")
@@ -275,11 +279,13 @@ def format_store_summary(data: dict) -> str:
         icon, diff = _compare(total_gmv, lw_gmv)
         lines.append(f"\n{icon} vs last {weekday}: HKD {lw_gmv:,.0f} ({diff})")
 
-    lines.append("\n<b>Top stores by GMV</b>")
-    for s in data["top_stores"]:
-        rm = f" [{s['rm_name']}]" if s.get("rm_name") else ""
+    lines.append("\n<b>Top 15 stores by GMV</b>")
+    for i, s in enumerate(data["top_stores"], 1):
+        name = _trunc(s["store_name"])
+        rm   = _trunc(s["rm_name"]) if s.get("rm_name") else "—"
         lines.append(
-            f"  {s['store_name']}{rm}: HKD {s['gmv']:,.0f} ({s['orders']:,} orders)"
+            f"  {i:2d}. {name} [{rm}]"
+            f"\n      HKD {s['gmv']:,.0f}  ({s['orders']:,} orders)"
         )
 
     if data.get("anomalies"):
@@ -287,10 +293,11 @@ def format_store_summary(data: dict) -> str:
         for a in data["anomalies"]:
             icon = "📈" if a["direction"] == "high" else "📉"
             sign = "+" if a["pct_diff"] > 0 else ""
-            rm = f" [{a['rm_name']}]" if a.get("rm_name") else ""
+            name = _trunc(a["store_name"])
+            rm   = _trunc(a["rm_name"]) if a.get("rm_name") else "—"
             lines.append(
-                f"  {icon} {a['store_name']}{rm}: HKD {a['gmv']:,.0f}"
-                f" ({sign}{a['pct_diff']:.0f}% vs {a['weeks_compared']}wk avg HKD {a['mean']:,.0f})"
+                f"  {icon} {name} [{rm}]"
+                f"\n     HKD {a['gmv']:,.0f} ({sign}{a['pct_diff']:.0f}% vs {a['weeks_compared']}wk avg HKD {a['mean']:,.0f})"
             )
 
     return "\n".join(lines)
