@@ -634,6 +634,15 @@ def _download_category_xlsx(base: str, headers: dict, site_id: str,
     return resp.content
 
 
+def _save_category_xlsx(content: bytes, date_str: str) -> str:
+    """Write the downloaded crosstab xlsx to CATEGORY_DIR for auditing."""
+    os.makedirs(CATEGORY_DIR, exist_ok=True)
+    path = os.path.join(CATEGORY_DIR, f"category_performance_{date_str}.xlsx")
+    with open(path, "wb") as f:
+        f.write(content)
+    return path
+
+
 def download_category_gmv_rest(target_date=None) -> list[dict]:
     """Download GMV by category from MonthlySalesbystore/bycat via REST API (PAT2).
 
@@ -656,9 +665,11 @@ def download_category_gmv_rest(target_date=None) -> list[dict]:
 
         view_id = _find_view_id(base, headers, site_id, _CAT_GMV_WORKBOOK, _CAT_GMV_VIEW)
         content = _download_category_xlsx(base, headers, site_id, view_id, date_str)
+        saved = _save_category_xlsx(content, date_str)
         rows = _parse_category_gmv_xlsx(content)
         total = sum(r["gmv"] for r in rows)
-        log.info("Category GMV REST: %d rows, total GMV %s for %s", len(rows), f"{total:,.0f}", date_str)
+        log.info("Category GMV REST: %d rows, total GMV %s for %s (saved %s)",
+                 len(rows), f"{total:,.0f}", date_str, saved)
 
         requests.post(f"{base}/auth/signout", headers=headers, timeout=10, verify=False)
         return rows
@@ -688,6 +699,7 @@ def backfill_category_gmv_rest(dates: list) -> dict:
             iso = d.strftime("%Y-%m-%d")
             try:
                 content = _download_category_xlsx(base, headers, site_id, view_id, iso)
+                _save_category_xlsx(content, iso)
                 rows = _parse_category_gmv_xlsx(content)
                 total = sum(r["gmv"] for r in rows)
                 log.info("  %s: %d rows, total GMV %s", iso, len(rows), f"{total:,.0f}")
