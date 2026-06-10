@@ -549,38 +549,56 @@ def _find_view_id(base: str, headers: dict, site_id: str,
     return view["id"]
 
 
-def _parse_category_gmv_csv(text: str) -> list[dict]:
-    """Parse the CSV from MonthlySalesbystore/bycat into category rows.
+def _parse_category_gmv_xlsx(content: bytes) -> list[dict]:
+    """Parse the crosstab xlsx from MonthlySalesbystore/bycat into category rows.
 
-    Keeps only GMV rows with Month=='All' and at least one non-empty category code.
+    Layout (14 cols): code/name pairs for Sub Cat 1-4 (cols 1-8), then
+    GMV / Cust # / Parent Order # for the month group (cols 9-11) and the
+    Total group (cols 12-14). Parent cells are merged (openpyxl → None), so we
+    forward-fill. We keep only leaf rows: skip subtotal rows ('Total' in any
+    code column) and the final 'Grand Total' row. Validated to reproduce the
+    manual download's grand total exactly.
+
     Maps Sub Cat 1-4 Chinese names → main_cat, sub_cat1, sub_cat2, sub_cat3.
     gp / gp_pct are 0 (not available in this view).
     """
-    import csv, io
+    import io
+    import openpyxl
 
+    wb = openpyxl.load_workbook(io.BytesIO(content), data_only=True)
+    ws = wb.worksheets[0]
+
+    code_cols = [1, 3, 5, 7]
+    name_cols = [2, 4, 6, 8]
+    last = {c: "" for c in code_cols + name_cols}
     rows: list[dict] = []
-    reader = csv.DictReader(io.StringIO(text))
-    for row in reader:
-        if row.get("Measure Names") != "GMV":
-            continue
-        if row.get("Month of Order Date (day)") != "All":
-            continue
 
-        c1 = (row.get("Primary Sub Cat 1 Code") or "").strip()
-        c2 = (row.get("Primary Sub Cat 2 Code") or "").strip()
-        c3 = (row.get("Primary Sub Cat 3 Code") or "").strip()
-        c4 = (row.get("Primary Sub Cat 4 Code") or "").strip()
-        if not any([c1, c2, c3, c4]):
-            continue  # grand total row — skip
+    for r in range(3, ws.max_row + 1):   # rows 1-2 are headers
+        c1 = ws.cell(r, 1).value
+        if c1 == "Grand Total":
+            continue
+        if any(ws.cell(r, c).value == "Total" for c in code_cols):
+            continue   # subtotal row
 
-        n1 = (row.get("sub_cat_1_name_chi") or "").strip()
-        n2 = (row.get("sub_cat_2_name_chi") or "").strip()
-        n3 = (row.get("sub_cat_3_name_chi") or "").strip()
-        n4 = (row.get("sub_cat_4_name_chi") or "").strip()
+        names = []
+        for cc, nc in zip(code_cols, name_cols):
+            cv = ws.cell(r, cc).value
+            nv = ws.cell(r, nc).value
+            if cv is None:
+                cv = last[cc]
+            else:
+                last[cc] = cv
+            if nv is None:
+                nv = last[nc]
+            else:
+                last[nc] = nv
+            names.append((nv or "").strip())
+
+        gmv = ws.cell(r, 9).value
+        gmv = float(gmv) if isinstance(gmv, (int, float)) else 0.0
 
         db_keys = ["main_cat", "sub_cat1", "sub_cat2", "sub_cat3", "sub_cat4"]
-        cats = [n1, n2, n3, n4, ""]
-        resolved = dict(zip(db_keys, cats))
+        resolved = dict(zip(db_keys, names + [""]))
 
         leaf, level = "", 0
         for i, k in enumerate(db_keys):
@@ -588,16 +606,11 @@ def _parse_category_gmv_csv(text: str) -> list[dict]:
                 leaf = resolved[k]
                 level = i + 1
 
-        try:
-            gmv = float(row.get("Measure Values") or 0)
-        except (ValueError, TypeError):
-            gmv = 0.0
-
         rows.append({**resolved, "leaf_cat": leaf, "level": level,
                      "gmv": gmv, "gp": 0.0, "gp_pct": 0.0})
 
     # Deduplicate: different Sub Cat codes can share the same Chinese name.
-    # Aggregate by category key, summing GMV.
+    # Aggregate by category name key, summing GMV.
     seen: dict = {}
     for r in rows:
         key = (r["main_cat"], r["sub_cat1"], r["sub_cat2"], r["sub_cat3"], r["sub_cat4"])
@@ -606,6 +619,19 @@ def _parse_category_gmv_csv(text: str) -> list[dict]:
         else:
             seen[key] = r
     return list(seen.values())
+
+
+def _download_category_xlsx(base: str, headers: dict, site_id: str,
+                            view_id: str, date_str: str) -> bytes:
+    """GET the crosstab Excel for a single day from the bycat view."""
+    resp = requests.get(
+        f"{base}/sites/{site_id}/views/{view_id}/crosstab/excel",
+        headers=headers,
+        params={"vf_Order Date (day)": date_str},
+        timeout=180, verify=False,
+    )
+    resp.raise_for_status()
+    return resp.content
 
 
 def download_category_gmv_rest(target_date=None) -> list[dict]:
@@ -629,17 +655,10 @@ def download_category_gmv_rest(target_date=None) -> list[dict]:
         log.info("PAT2 signed in for category GMV download")
 
         view_id = _find_view_id(base, headers, site_id, _CAT_GMV_WORKBOOK, _CAT_GMV_VIEW)
-
-        resp = requests.get(
-            f"{base}/sites/{site_id}/views/{view_id}/data",
-            headers=headers,
-            params={"vf_Order Date (day)": date_str},
-            timeout=120, verify=False,
-        )
-        resp.raise_for_status()
-
-        rows = _parse_category_gmv_csv(resp.text)
-        log.info("Category GMV REST: %d rows for %s", len(rows), date_str)
+        content = _download_category_xlsx(base, headers, site_id, view_id, date_str)
+        rows = _parse_category_gmv_xlsx(content)
+        total = sum(r["gmv"] for r in rows)
+        log.info("Category GMV REST: %d rows, total GMV %s for %s", len(rows), f"{total:,.0f}", date_str)
 
         requests.post(f"{base}/auth/signout", headers=headers, timeout=10, verify=False)
         return rows
@@ -668,15 +687,10 @@ def backfill_category_gmv_rest(dates: list) -> dict:
         for d in dates:
             iso = d.strftime("%Y-%m-%d")
             try:
-                resp = requests.get(
-                    f"{base}/sites/{site_id}/views/{view_id}/data",
-                    headers=headers,
-                    params={"vf_Order Date (day)": iso},
-                    timeout=120, verify=False,
-                )
-                resp.raise_for_status()
-                rows = _parse_category_gmv_csv(resp.text)
-                log.info("  %s: %d rows", iso, len(rows))
+                content = _download_category_xlsx(base, headers, site_id, view_id, iso)
+                rows = _parse_category_gmv_xlsx(content)
+                total = sum(r["gmv"] for r in rows)
+                log.info("  %s: %d rows, total GMV %s", iso, len(rows), f"{total:,.0f}")
                 results[iso] = rows
             except Exception as exc:
                 log.error("  %s failed: %s", iso, exc)
