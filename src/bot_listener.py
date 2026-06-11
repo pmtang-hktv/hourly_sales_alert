@@ -10,6 +10,7 @@ import anthropic
 import requests
 
 from src.config import ANTHROPIC_API_KEY, DB_PATH, TELEGRAM_ALL_CHAT_IDS, TELEGRAM_BOT_TOKEN
+from src.name_mapping import get_bot_alias_block
 
 log = logging.getLogger(__name__)
 
@@ -88,6 +89,8 @@ Table: store_performance  — one row per (report_date, store_code, main_cat) fr
   store_performance is populated once daily at ~15:30 HKT — today's data may not exist yet.
 """
 
+_ALIAS_BLOCK = get_bot_alias_block()
+
 _SYSTEM = [
     {
         "type": "text",
@@ -96,6 +99,12 @@ by querying the database with the query_sales_db tool, then giving a clear, \
 concise answer in plain English.
 
 {_SCHEMA}
+
+Name aliases — when the user refers to a person by a short name or alias, resolve it using \
+the mappings below before querying (e.g. "Jeff" means team_head='Jeff Tsui'):
+{_ALIAS_BLOCK}
+Note: rm_name values in the DB are canonical (e.g. "Cat Tang" not "Cat", "Fiona Wu" not "Fiona").
+Always use the canonical name in SQL WHERE clauses.
 
 Data availability note:
 - daily_summary is only populated from midnight emails — it may not cover all dates

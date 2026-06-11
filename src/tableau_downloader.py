@@ -35,6 +35,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
 from src.config import CATEGORY_DIR, DAILY_DIR, STORE_DIR, TABLEAU_ACCESS_KEY, TABLEAU_HEADLESS, TABLEAU_PAT_NAME, TABLEAU_PAT_SECRET, TABLEAU_PAT2_NAME, TABLEAU_PAT2_SECRET, TABLEAU_PASSWORD, TABLEAU_SERVER, TABLEAU_USERNAME
+from src.name_mapping import normalize_team_head, normalize_rm_name
 
 log = logging.getLogger(__name__)
 
@@ -761,9 +762,9 @@ def _parse_store_gmv_xlsx(content: bytes) -> list[dict]:
         orders = int(orders)   if isinstance(orders, (int, float)) else 0
 
         rows.append({
-            "team_head":  str(team_head).strip() if team_head else "",
+            "team_head":  normalize_team_head(str(team_head).strip() if team_head else ""),
             "rm_code":    str(rm_code).strip(),
-            "rm_name":    str(rm_name).strip(),
+            "rm_name":    normalize_rm_name(str(rm_name).strip()),
             "store_code": str(store_code).strip(),
             "store_name": str(store_name).strip(),
             "main_cat":   main_cat,
