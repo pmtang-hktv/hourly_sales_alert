@@ -10,6 +10,7 @@
     {"canonical": "Leo",           "aliases": ["Leo"],         "db_variants": ["Leo"]},
     {"canonical": "Pat Lai",       "aliases": ["Pat"],         "db_variants": ["Pat Lai"]},
     {"canonical": "Priscilla Chan","aliases": ["Jacqueline"],  "db_variants": ["Priscilla Chan"]},
+    {"canonical": "Rita Wong",     "aliases": ["Rita"],        "db_variants": ["Rita Wong"]},
     {"canonical": "Tracy Leung",   "aliases": ["Tracy Leung"], "db_variants": ["Tracy Leung"]},
     {"canonical": "Vince",         "aliases": ["Vince"],       "db_variants": ["Vince"]},
     {"canonical": "Vince_GL",      "aliases": ["Greenlab", "GL", "Vince GL"], "db_variants": ["Vince_GL"]},
