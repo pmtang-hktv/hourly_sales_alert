@@ -23,7 +23,8 @@ STORE_DIR = os.getenv("STORE_DIR", "data/store")
 # Folder where the daily Tableau Daily Sales Update PDF is downloaded
 DAILY_DIR = os.getenv("DAILY_DIR", "data/daily")
 ANOMALY_Z_THRESHOLD = float(os.getenv("ANOMALY_Z_THRESHOLD", "2.0"))
-MIN_GATEWAY_VOLUME = int(os.getenv("MIN_GATEWAY_VOLUME", "20"))
+GATEWAY_Z_THRESHOLD = float(os.getenv("GATEWAY_Z_THRESHOLD", "3.0"))
+MIN_GATEWAY_VOLUME = int(os.getenv("MIN_GATEWAY_VOLUME", "50"))
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
 # Tableau Server automation

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 
 import numpy as np
 
-from src.config import ANOMALY_Z_THRESHOLD, MIN_GATEWAY_VOLUME
+from src.config import ANOMALY_Z_THRESHOLD, GATEWAY_Z_THRESHOLD, MIN_GATEWAY_VOLUME
 from src.db import get_daily_history, get_hourly_history, get_hours_for_date
 from src.parser import GATEWAY_COLS
 
@@ -38,12 +38,14 @@ def check_anomalies(current_row: dict) -> list[dict]:
         avg = np.mean([h.get(gw, 0) or 0 for h in history])
         if avg < MIN_GATEWAY_VOLUME:
             continue
-        _check_metric(current_row, history, gw, gw.replace("_", " ").title(), anomalies)
+        _check_metric(current_row, history, gw, gw.replace("_", " ").title(), anomalies,
+                      z_threshold=GATEWAY_Z_THRESHOLD)
 
     return anomalies
 
 
-def _check_metric(row: dict, history: list[dict], col: str, label: str, out: list):
+def _check_metric(row: dict, history: list[dict], col: str, label: str, out: list,
+                  z_threshold: float = ANOMALY_Z_THRESHOLD):
     values = [h.get(col) or 0 for h in history]
     if len(values) < 3:
         return
@@ -53,7 +55,7 @@ def _check_metric(row: dict, history: list[dict], col: str, label: str, out: lis
         return
     current = float(row.get(col) or 0)
     z = (current - mean) / std
-    if abs(z) >= ANOMALY_Z_THRESHOLD:
+    if abs(z) >= z_threshold:
         pct = round((current - mean) / mean * 100, 1) if mean else 0
         out.append({
             "metric":    col,
